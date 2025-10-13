@@ -13,9 +13,9 @@
 
 ## 🚀 Latest News
 
-- 🚩 **News (2025.10)**: PatchMoE (large) is now available on Hugging Face Hub
+- 🚩 **News (2025.10)**: PatchMoE (large) is now available on [HuggingFace](https://huggingface.co/ant-intl/PatchMoE_Large)
 - 📊 **Performance**: Achieved state-of-the-art results on multiple time series benchmarks
-- 🔧 **Integration**: Full compatibility with Hugging Face Transformers ecosystem
+- 🔧 **Integration**: Full compatibility with HuggingFace Transformers ecosystem
 
 ## 📖 Introduction
 
@@ -102,7 +102,7 @@ from transformers import AutoModelForCausalLM, AutoConfig
 
 # Load pre-trained model (when available)
 model = AutoModelForCausalLM.from_pretrained(
-    'patch-moe/patchmoe-large', 
+    'ant-intl/PatchMoE_Large', 
     trust_remote_code=True
 )
 
