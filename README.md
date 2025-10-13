@@ -23,9 +23,9 @@ PatchMoE is a cutting-edge time series foundation model that leverages the power
 
 ### Key Features
 
-- 🎯 **Multi-Scale Patch Processing**: Utilizes multiple patch sizes for comprehensive temporal pattern capture
-- ⚡ **Mixture of Experts**: Efficient routing mechanism for scalable model capacity
-- 🔄 **Flexible Input / Output Length**: Supports arbitrary input and output length
+- **Multi-Scale Patch Processing**: Utilizes multiple patch sizes for comprehensive temporal pattern capture
+- **Mixture of Experts**: Efficient routing mechanism for scalable model capacity
+- **Flexible Input / Output Length**: Supports arbitrary input and output length
 
 <!-- <div align="center">
     <img src="figures/patchmoe_framework.png" alt="PatchMoE Framework" width="700px" />
@@ -34,7 +34,7 @@ PatchMoE is a cutting-edge time series foundation model that leverages the power
 
 ![PatchMoE Architecture Overview](figures/patchmoe_framework.png)
 
-### 📊 Model Configurations
+### Model Configurations
 
 | Model | <i>L<sub>MoE</sub></i> | <i>L<sub>Expert</sub></i> | Heads | <i>d<sub>model</sub></i> | <i>d<sub>ff</sub></i> | <i>L</i> | Experts | <i>k</i> | Average Activated Params | Total Params |
 |:-----:|:---------:|:------------:|:-----:|:------------:|:-----------:|:----:|:-------:|:---:|:---------:|:--------:|
@@ -42,7 +42,7 @@ PatchMoE is a cutting-edge time series foundation model that leverages the power
 | PatchMoE<sub>large<sub> | 2 | 4 | 16 | 1024 | 4096 | 2880 | 4 | 1 | 1.2B | 2.5B |
 | PatchMoE<sub>ultra<sub> | 3 | 4 | 16 | 1024 | 4096 | 2880 | 8 | 2 | 3.8B | 8.5B |
 
-### 🎯 Performance
+### Performance
 <!-- #### todo: figures and text
 PatchMoE achieves state-of-the-art performance on multiple time series forecasting benchmarks:
 
@@ -55,7 +55,7 @@ PatchMoE achieves state-of-the-art performance on multiple time series forecasti
 <!-- ![Full-Shot](figures/full_shot.png) -->
 <!-- ![Table](figures/table.png) -->
 
-### 📈 Inference Time on different devices
+### Inference Time on different devices
 
 <!-- | Lookback | Forcast | Inference Time |Device |
 | ------------------- | -------------- | -------------- | -------------- |
@@ -80,7 +80,7 @@ PatchMoE achieves state-of-the-art performance on multiple time series forecasti
 
 ## 🚀 Quick Start
 
-### 🛠️ Installation
+### Installation
 
 1. Clone the repository
 
@@ -95,7 +95,7 @@ cd patchmoe
 - PyTorch >= 2.0.0
 - transformers == 4.40.1
 
-### 🧪 Code Example
+### Code Example
 
 ```python
 from transformers import AutoModelForCausalLM, AutoConfig
@@ -124,7 +124,7 @@ You can access the well-acknowledged long-term forecast datasets from [[Google D
 + Benchmark evaluation on ETTh1
 
 ```bash
-python run_eval.py --root_path ./dataset --test_data_list ETTh1
+python run_eval.py --ckpt_path ant-intl/PatchMoE_Large --root_path ./dataset --test_data_list ETTh1
 ```
 
 ### Advanced Usage
