@@ -47,8 +47,7 @@ if __name__ == "__main__":
         print(f"Loading model from: {args.ckpt_path}")
         model = AutoModelForCausalLM.from_pretrained(
             args.ckpt_path,
-            trust_remote_code=True,
-            local_files_only=True
+            trust_remote_code=True
         ).to(device=args.device)
         
         # Run comprehensive evaluation across all datasets

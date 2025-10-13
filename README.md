@@ -98,6 +98,7 @@ cd patchmoe
 ### Code Example
 
 ```python
+import torch
 from transformers import AutoModelForCausalLM, AutoConfig
 
 # Load pre-trained model (when available)
