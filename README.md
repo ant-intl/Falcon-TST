@@ -72,7 +72,10 @@ PatchMoE achieves state-of-the-art performance on multiple time series forecasti
 | 2880              | 336 | 19.924ms         | A100
 | 2880              | 720 | 76.741ms         | A100 -->
 
-![Inference Time](figures/inference_time.png)
+<!-- ![Inference Time](figures/inference_time.png) -->
+<div align="center">
+<img src="figures/inference_time.png" alt="描述文字" width="80%">
+</div>
 
 
 ## 🚀 Quick Start
