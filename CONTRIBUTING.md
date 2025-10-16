@@ -1,6 +1,6 @@
 # Contributing to PatchMoE
 
-We welcome contributions to PatchMoE! This document provides guidelines for contributing to the project.
+We welcome contributions to Falcon-TST! This document provides guidelines for contributing to the project.
 
 ## 🚀 Getting Started
 
