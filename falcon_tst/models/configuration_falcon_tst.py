@@ -1,7 +1,7 @@
 """
-Configuration class for PatchMoE model.
+Configuration class for Falcon-TST model.
 
-This module defines the configuration for PatchMoE, a large-scale time series foundation model
+This module defines the configuration for Falcon-TST, a large-scale time series foundation model
 that utilizes Mixture of Experts (MoE) architecture with multiple patch tokenizers.
 """
 
@@ -9,11 +9,11 @@ from typing import List, Optional
 from transformers import PretrainedConfig
 
 
-class PatchMoeConfig(PretrainedConfig):
+class FalconTSTConfig(PretrainedConfig):
     """
-    Configuration class for PatchMoE model.
+    Configuration class for Falcon-TST model.
 
-    PatchMoE is a time series foundation model that uses Mixture of Experts architecture
+    Falcon-TST is a time series foundation model that uses Mixture of Experts architecture
     with multiple patch tokenizers for efficient time series forecasting.
 
     This configuration inherits from [`PretrainedConfig`] and can be used to control the model
@@ -98,7 +98,7 @@ class PatchMoeConfig(PretrainedConfig):
             Whether to tie word embeddings.
     """
 
-    model_type = "patch_moe"
+    model_type = "falcon_tst"
     keys_to_ignore_at_inference = ["past_key_values"]
 
     def __init__(
@@ -142,7 +142,7 @@ class PatchMoeConfig(PretrainedConfig):
         tie_word_embeddings: bool = False,
         **kwargs,
     ):
-        """Initialize PatchMoE configuration."""
+        """Initialize Falcon-TST configuration."""
         # Set default values for list parameters
         if patch_size_list is None:
             patch_size_list = [96, 64, 48, 24]
@@ -150,14 +150,15 @@ class PatchMoeConfig(PretrainedConfig):
             multi_forecast_head_list = [24, 96, 336]
         if autoregressive_step_list is None:
             autoregressive_step_list = [2, 4, 1]
-        # patchmoe inference specific
+        
+        # Falcon-TST inference specific
         self.test_data_seq_len = test_data_seq_len
         self.inference_length = test_data_test_len
         self.autoregressive_step_list = autoregressive_step_list
         self.multi_forecast_head_type = multi_forecast_head_type
         self.use_cache = True
 
-        # patchmoe specific
+        # Falcon-TST specific
         self.hidden_size = hidden_size
         self.ffn_hidden_size = ffn_hidden_size
         self.num_attention_heads = num_attention_heads
@@ -179,7 +180,7 @@ class PatchMoeConfig(PretrainedConfig):
         self.use_cpu_initialization = use_cpu_initialization
         self.rotary_interleaved = rotary_interleaved
 
-        # expert specific
+        # Expert specific
         self.patch_size_list = patch_size_list
         self.num_moe_experts = num_experts
         self.shared_patch_size = shared_patch_size

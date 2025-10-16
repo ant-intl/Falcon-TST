@@ -1,5 +1,5 @@
 """
-Eval Dataset class for PatchMoE
+Eval Dataset class for Falcon-TST
 """
 
 from .benchmark_dataset import BenchmarkEvalDataset

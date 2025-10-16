@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 _*-
 """
-Benchmark Dataset Module for PatchMoE Time Series Evaluation
+Benchmark Dataset Module for Falcon-TST Time Series Evaluation
 
 This module provides dataset classes for loading and preprocessing time series data
 from various benchmark datasets (ETT, Weather, Electricity, etc.) for evaluation
-of the PatchMoE model.
+of the Falcon-TST model.
 """
 
 import numpy as np

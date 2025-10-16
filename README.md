@@ -13,7 +13,7 @@
 
 ## 🚀 Latest News
 
-- 🚩 **News (2025.10)**: Falcon-TST (large) is now available on [HuggingFace](https://huggingface.co/ant-intl/PatchMoE_Large)
+- 🚩 **News (2025.10)**: Falcon-TST (large) is now available on [HuggingFace](https://huggingface.co/ant-intl/Falcon-TST_Large)
 - 📊 **Performance**: Achieved state-of-the-art results on multiple time series benchmarks
 - 🔧 **Integration**: Full compatibility with HuggingFace Transformers ecosystem
 
@@ -27,12 +27,12 @@ Falcon-TST is a cutting-edge time series foundation model that leverages the pow
 - **Mixture of Experts**: Efficient routing mechanism for scalable model capacity
 - **Flexible Input / Output Length**: Supports arbitrary input and output length
 
-<!-- <div align="center">
-    <img src="figures/patchmoe_framework.png" alt="PatchMoE Framework" width="700px" />
-    <p><em>PatchMoE Architecture Overview</em></p>
-</div> -->
 
-![PatchMoE Architecture Overview](figures/patchmoe_framework.png)
+<div align="center">
+<img src="figures/falcon_tst_framework.png" alt="description" width="70%">
+</div>
+
+<!-- ![Falcon-TST Architecture Overview](figures/falcon_tst_framework.png) -->
 
 ### Model Configurations
 
@@ -43,38 +43,16 @@ Falcon-TST is a cutting-edge time series foundation model that leverages the pow
 | Falcon-TST<sub>ultra<sub> | 3 | 4 | 16 | 1024 | 4096 | 2880 | 8 | 2 | 3.8B | 8.5B |
 
 ### Performance
-<!-- #### todo: figures and text
-Falcon-TST achieves state-of-the-art performance on multiple time series forecasting benchmarks:
 
-- **Time-Series-Library**: Ranked #1 in MSE/MAE metrics
-- **ETT Dataset**: Superior performance across all variants (ETTh1, ETTh2, ETTm1, ETTm2)
-- **Weather Dataset**: Consistent improvements over baseline models
-- **Electricity Dataset**: Excellent scalability for high-dimensional time series -->
+<div align="center">
+<img src="figures/zero_shot.png" alt="description" width="70%">
+</div>
 
-![Zero-Shot](figures/zero_shot.png)
-<!-- ![Full-Shot](figures/full_shot.png) -->
-<!-- ![Table](figures/table.png) -->
 
 ### Inference Time on different devices
 
-<!-- | Lookback | Forcast | Inference Time |Device |
-| ------------------- | -------------- | -------------- | -------------- |
-| 2880              | 96 | 194.685ms        | Apple M4 Pro
-| 2880              | 192 | 195.189ms        | Apple M4 Pro
-| 2880              | 336 | 195.945ms        | Apple M4 Pro
-| 2880              | 720 | 891.788ms        | Apple M4 Pro
-| 2880              | 96 | 22.302ms         | A10
-| 2880              | 192 | 22.689ms         | A10
-| 2880              | 336 | 23.559ms         | A10
-| 2880              | 720 | 84.543ms         | A10
-| 2880              | 96 | 19.399ms         | A100
-| 2880              | 192 | 19.745ms         | A100
-| 2880              | 336 | 19.924ms         | A100
-| 2880              | 720 | 76.741ms         | A100 -->
-
-<!-- ![Inference Time](figures/inference_time.png) -->
 <div align="center">
-<img src="figures/inference_time.png" alt="描述文字" width="80%">
+<img src="figures/inference_time.png" alt="description" width="70%">
 </div>
 
 
@@ -85,8 +63,8 @@ Falcon-TST achieves state-of-the-art performance on multiple time series forecas
 1. Clone the repository
 
 ```bash
-git clone https://github.com/patch-moe/patchmoe.git
-cd patchmoe
+git clone https://github.com/patch-moe/Falcon-TST.git
+cd Falcon-TST
 ```
 
 2. Install the following dependencies
@@ -103,7 +81,7 @@ from transformers import AutoModelForCausalLM, AutoConfig
 
 # Load pre-trained model (when available)
 model = AutoModelForCausalLM.from_pretrained(
-    'ant-intl/PatchMoE_Large', 
+    'ant-intl/Falcon-TST_Large', 
     trust_remote_code=True
 )
 
@@ -125,7 +103,7 @@ You can access the well-acknowledged long-term forecast datasets from [[Google D
 + Benchmark evaluation on ETTh1
 
 ```bash
-python run_eval.py --ckpt_path ant-intl/PatchMoE_Large --root_path ./dataset --test_data_list ETTh1
+python run_eval.py --ckpt_path ant-intl/Falcon-TST_Large --root_path ./dataset --test_data_list ETTh1
 ```
 
 ### Advanced Usage

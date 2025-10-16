@@ -1,5 +1,5 @@
 """
-Time Series Generation Mixin for PatchMoE
+Time Series Generation Mixin for Falcon-TST
 
 This module provides generation capabilities specifically designed for time series
 forecasting tasks. It extends the standard Transformers GenerationMixin to handle
@@ -16,9 +16,9 @@ from transformers.generation.utils import (
 )
 
 
-class PatchMoEGenerationMixin(GenerationMixin):
+class FalconTSTGenerationMixin(GenerationMixin):
     """
-    Generation mixin class for PatchMoE time series forecasting.
+    Generation mixin class for Falcon-TST time series forecasting.
 
     This class extends the standard Transformers GenerationMixin to provide
     specialized generation capabilities for time series data, including proper
@@ -43,7 +43,7 @@ class PatchMoEGenerationMixin(GenerationMixin):
         **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         """
-        Generate time series forecasts using the PatchMoE model.
+        Generate time series forecasts using the Falcon-TST model.
 
         This method handles the generation of time series forecasts with proper
         input preprocessing and output postprocessing for multi-channel data.

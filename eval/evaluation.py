@@ -1,7 +1,7 @@
 """
-Evaluation Module for PatchMoE Time Series Forecasting
+Evaluation Module for Falcon-TST
 
-This module provides comprehensive evaluation functionality for the PatchMoE model
+This module provides comprehensive evaluation functionality for the Falcon-TST model
 on various time series forecasting benchmarks. It handles batch evaluation,
 metric computation, and result aggregation across multiple datasets.
 """
@@ -15,7 +15,7 @@ import pandas as pd
 
 class Eval:
     """
-    Evaluation class for PatchMoE model performance assessment.
+    Evaluation class for Falcon-TST model performance assessment.
     
     This class orchestrates the evaluation process across multiple benchmark datasets,
     computing forecasting metrics and generating comprehensive evaluation reports.
@@ -42,7 +42,7 @@ class Eval:
         
         Args:
             data_loader: PyTorch DataLoader containing evaluation samples
-            model: PatchMoE model instance for generating predictions
+            model: Falcon-TST model instance for generating predictions
             
         Returns:
             dict: Dictionary containing computed metrics:
@@ -104,7 +104,7 @@ class Eval:
         5. Reports performance statistics
         
         Args:
-            model: PatchMoE model instance to evaluate
+            model: Falcon-TST model instance to evaluate
             
         Returns:
             pd.DataFrame: Aggregated evaluation results across all datasets

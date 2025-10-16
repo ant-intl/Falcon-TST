@@ -1,7 +1,7 @@
 """
-Test suite for PatchMoE
+Test suite for Falcon-TST
 
-This package contains comprehensive tests for the PatchMoE time series foundation model,
+This package contains comprehensive tests for the Falcon-TST foundation model,
 including unit tests, integration tests, and performance benchmarks.
 """
 from .evaluation import  Eval

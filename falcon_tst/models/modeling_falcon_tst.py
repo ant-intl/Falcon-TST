@@ -6,8 +6,8 @@ from torch import Tensor
 import math
 from functools import reduce
 from abc import ABC, abstractmethod
-from .configuration_patch_moe import PatchMoeConfig
-from .ts_generation_mixin import PatchMoEGenerationMixin
+from .configuration_falcon_tst import FalconTSTConfig
+from .ts_generation_mixin import FalconTSTGenerationMixin
 from transformers import PreTrainedModel
 
 
@@ -418,7 +418,7 @@ class TransformerLayer(nn.Module):
         return x
 
 
-class PatchMoEExpert_v2(nn.Module):
+class FalconTSTExpert_v2(nn.Module):
     def __init__(self, config, patch_input_size=32, expert_output_size=336, final_layernorm=True):
         super().__init__()
         self.config = config
@@ -543,14 +543,14 @@ class PatchMoEExpert_v2(nn.Module):
         return expert_output
 
 
-class SequentialPatchMoE(nn.Module):
+class SequentialFalconTST(nn.Module):
     def __init__(self, config, expert_output_size=336):
         super().__init__()
         self.config = config
         self.expert_output_size = expert_output_size
         self.local_experts = nn.ModuleList(
             [
-                PatchMoEExpert_v2(
+                FalconTSTExpert_v2(
                     config,
                     expert_output_size=expert_output_size,
                     patch_input_size=config.patch_size_list[expert_id],
@@ -622,7 +622,7 @@ class Router(ABC, nn.Module):
 
     def __init__(
         self,
-        config: PatchMoeConfig,
+        config: FalconTSTConfig,
     ) -> None:
         """
         Initialize the Router module.
@@ -701,7 +701,7 @@ class TopKRouter(Router):
 
     def __init__(
         self,
-        config: PatchMoeConfig,
+        config: FalconTSTConfig,
     ) -> None:
         """Initialize the zero token dropping router.
 
@@ -763,7 +763,7 @@ class TopKRouter(Router):
         return scores, routing_map
 
 
-class PatchMoEMoELayer(nn.Module):
+class FalconTSTMoELayer(nn.Module):
     def __init__(self, config, layer_number):
         super().__init__()
         self.config = config
@@ -786,11 +786,11 @@ class PatchMoEMoELayer(nn.Module):
         else:
             self.backcast_layernorm = RMSNorm(self.seq_length)
 
-        self.experts = SequentialPatchMoE(
+        self.experts = SequentialFalconTST(
             config,
             expert_output_size=self.expert_output_size,
         )
-        self.shared_experts = PatchMoEExpert_v2(
+        self.shared_experts = FalconTSTExpert_v2(
             config,
             expert_output_size=self.expert_output_size,
             patch_input_size=config.shared_patch_size,
@@ -953,13 +953,13 @@ class PatchMoEMoELayer(nn.Module):
         return output_backcast, output_forecast
 
 
-class PatchMoEBlock(nn.Module):
+class FalconTSTBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
         self.layers = nn.ModuleList(
             [
-                PatchMoEMoELayer(config, layer_num + 1)
+                FalconTSTMoELayer(config, layer_num + 1)
                 for layer_num in range(self.config.num_hidden_layers)
             ]
         )
@@ -972,11 +972,11 @@ class PatchMoEBlock(nn.Module):
         return backcast, forecast
 
 
-class PatchMoEPreTrainedModel(PreTrainedModel):
-    config_class = PatchMoeConfig
+class FalconTSTPreTrainedModel(PreTrainedModel):
+    config_class = FalconTSTConfig
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
-    _no_split_modules = ["PatchMoEMoELayer"]
+    _no_split_modules = ["FalconTSTMoELayer"]
     _skip_keys_device_placement = "past_key_values"
     _supports_flash_attn_2 = True
     _supports_sdpa = False
@@ -993,8 +993,8 @@ class PatchMoEPreTrainedModel(PreTrainedModel):
                 module.weight.data[module.padding_idx].zero_()
 
 
-class PatchMoEModel(PatchMoEPreTrainedModel):
-    def __init__(self, config: PatchMoeConfig):
+class FalconTSTModel(FalconTSTPreTrainedModel):
+    def __init__(self, config: FalconTSTConfig):
         super().__init__(config)
         self.config = config
         self.seq_length = config.seq_length
@@ -1004,7 +1004,7 @@ class PatchMoEModel(PatchMoEPreTrainedModel):
             use_cpu_initialization=self.config.use_cpu_initialization,
             rotary_interleaved=self.config.rotary_interleaved,
         )
-        self.decoder = PatchMoEBlock(config=config)
+        self.decoder = FalconTSTBlock(config=config)
         if self.config.do_expert_forecast and self.config.heterogeneous_moe_layer:
             self.output_layer = IdentityOp()
         else:
@@ -1079,7 +1079,7 @@ class PatchMoEModel(PatchMoEPreTrainedModel):
             final_output = self._auto_regressive_single_head(
                 input=input,
                 input_mask=input_mask,
-                patchmoe_forecast=mixed_pred,
+                falcon_tst_forecast=mixed_pred,
                 rotary_pos_emb=rotary_pos_emb,
             )
         else:
@@ -1121,17 +1121,17 @@ class PatchMoEModel(PatchMoEPreTrainedModel):
 
         if self.config.do_base_forecast:
             assert base_forecast is not None, f"base_forecast is None"
-            patchmoe_forecast = base_forecast + decoder_forecast
+            falcon_tst_forecast = base_forecast + decoder_forecast
         else:
-            patchmoe_forecast = decoder_forecast
+            falcon_tst_forecast = decoder_forecast
 
-        return patchmoe_forecast
+        return falcon_tst_forecast
 
     def _auto_regressive_single_head(
         self,
         input,  # [batch_size, seq_len]
         input_mask,  # [batch_size, seq_len]
-        patchmoe_forecast,  # [batch_size, max(multi_forecast_head)]
+        falcon_tst_forecast,  # [batch_size, max(multi_forecast_head)]
         rotary_pos_emb,  # [seq_len, 1, 1, kv_channels(hidden_size // num_heads)]
         auto_regressive_strategy="from_long_to_short",
     ):
@@ -1144,7 +1144,7 @@ class PatchMoEModel(PatchMoEPreTrainedModel):
             # From long to short
             multi_forecast_head_list = sorted(self.config.multi_forecast_head_list, reverse=True)
 
-            final_output = patchmoe_forecast
+            final_output = falcon_tst_forecast
             while final_output.shape[1] < self.config.inference_length:
                 # adaptive choose the forecast head
                 remain_pred_len = self.config.inference_length - final_output.shape[1]
@@ -1156,14 +1156,14 @@ class PatchMoEModel(PatchMoEPreTrainedModel):
                 head_pred_len = multi_forecast_head_list[idx]
 
                 # one-step model prediction
-                input = torch.cat([input, patchmoe_forecast], dim=1)[
+                input = torch.cat([input, falcon_tst_forecast], dim=1)[
                     :, -self.seq_length :
                 ].contiguous()
                 input_mask = torch.cat(
                     [
                         input_mask,
                         torch.ones(
-                            patchmoe_forecast.shape,
+                            falcon_tst_forecast.shape,
                             dtype=input_mask.dtype,
                             device=input_mask.device,
                         ),
@@ -1173,16 +1173,16 @@ class PatchMoEModel(PatchMoEPreTrainedModel):
                     :, -self.seq_length :
                 ].contiguous()  # 0:mask, 1:unmask
 
-                patchmoe_forecast = self._inference_step(
+                falcon_tst_forecast = self._inference_step(
                     input=input,
                     input_mask=input_mask,
                     rotary_pos_emb=rotary_pos_emb,
                 )
 
                 # the core idea of multi forecast head type of [single]
-                patchmoe_forecast = patchmoe_forecast[:, :head_pred_len]
+                falcon_tst_forecast = falcon_tst_forecast[:, :head_pred_len]
 
-                final_output = torch.cat([final_output, patchmoe_forecast], dim=1)
+                final_output = torch.cat([final_output, falcon_tst_forecast], dim=1)
 
             final_output = final_output[:, : self.config.inference_length]
 
@@ -1205,7 +1205,7 @@ class PatchMoEModel(PatchMoEPreTrainedModel):
                 multi_forecast_head_dict[head_pred_len] = ar_step
 
             # the core idea of strategy [from_short_to_long]
-            mixed_pred = patchmoe_forecast
+            mixed_pred = falcon_tst_forecast
             output_list = []
             cur_pred = None
             cur_pred_len = 0
@@ -1246,13 +1246,13 @@ class PatchMoEModel(PatchMoEPreTrainedModel):
                         :, -self.seq_length :
                     ].contiguous()  # 0:mask, 1:unmask
 
-                    patchmoe_forecast = self._inference_step(
+                    falcon_tst_forecast = self._inference_step(
                         input=cur_input,
                         input_mask=cur_input_mask,
                         rotary_pos_emb=rotary_pos_emb,
                     )
 
-                    head_pred = patchmoe_forecast[:, :head_pred_len]
+                    head_pred = falcon_tst_forecast[:, :head_pred_len]
                     output_list.append(head_pred)
                     cur_pred = torch.cat(output_list, dim=1)
                     cur_pred_len = cur_pred.shape[1]
@@ -1270,11 +1270,11 @@ class PatchMoEModel(PatchMoEPreTrainedModel):
         return final_output
 
 
-class PatchMoEForPrediction(PatchMoEPreTrainedModel, PatchMoEGenerationMixin):
-    def __init__(self, config: PatchMoeConfig):
+class FalconTSTForPrediction(FalconTSTPreTrainedModel, FalconTSTGenerationMixin):
+    def __init__(self, config: FalconTSTConfig):
         super().__init__(config)
         self.config = config
-        self.model = PatchMoEModel(self.config)
+        self.model = FalconTSTModel(self.config)
         self.post_init()
 
     def forward(

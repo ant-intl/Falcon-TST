@@ -1,7 +1,7 @@
 """
-PatchMoE Benchmark Evaluation Example
+Falcon-TST Benchmark Evaluation Example
 
-This script demonstrates how to evaluate a pre-trained PatchMoE model on multiple
+This script demonstrates how to evaluate a pre-trained Falcon-TST model on multiple
 benchmark datasets including ETT (Electricity Transforming Temperature), Weather,
 and Electricity datasets. It loads a model checkpoint and runs comprehensive
 evaluation across all specified datasets.
@@ -15,11 +15,11 @@ import argparse
 
 if __name__ == "__main__":
     """
-    Main evaluation script for PatchMoE model benchmarking.
+    Main evaluation script for Falcon-TST model benchmarking.
 
     This script:
     1. Configures evaluation parameters for multiple datasets
-    2. Loads a pre-trained PatchMoE model from checkpoint
+    2. Loads a pre-trained Falcon-TST model from checkpoint
     3. Runs evaluation across all benchmark datasets
     4. Saves results and prints performance summary
     """
@@ -43,7 +43,7 @@ if __name__ == "__main__":
         # Initialize evaluator with configuration
         evaluator = Eval(args)
 
-        # Load pre-trained PatchMoE model from checkpoint
+        # Load pre-trained Falcon-TST model from checkpoint
         print(f"Loading model from: {args.ckpt_path}")
         model = AutoModelForCausalLM.from_pretrained(
             args.ckpt_path,
