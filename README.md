@@ -23,24 +23,20 @@ Falcon-TST is a cutting-edge time series foundation model that leverages the pow
 
 ### Key Features
 
-- **Multi-Scale Patch Processing**: Utilizes multiple patch sizes for comprehensive temporal pattern capture
+- **Multi-Scale Patch Tokenizers**: Utilizes multiple patch tokenizers to capture comprehensive temporal patterns
 - **Mixture of Experts**: Efficient routing mechanism for scalable model capacity
 - **Flexible Input / Output Length**: Supports arbitrary input and output length
 
 
 <div align="center">
-<img src="figures/falcon_tst_framework.png" alt="description" width="70%">
+<img src="figures/falcon_tst_framework.png" alt="description" width="100%">
 </div>
 
 <!-- ![Falcon-TST Architecture Overview](figures/falcon_tst_framework.png) -->
 
 ### Model Configurations
 
-<!-- | Model | <i>L<sub>MoE</sub></i> | <i>L<sub>Expert</sub></i> | Heads | <i>d<sub>model</sub></i> | <i>d<sub>ff</sub></i> | <i>L</i> | Experts | <i>k</i> | Average Activated Params | Total Params |
-|:-----:|:---------:|:------------:|:-----:|:------------:|:-----------:|:----:|:-------:|:---:|:---------:|:--------:|
-| Falcon-TST<sub>base<sub> | 2 | 4 | 8 | 512 | 2048 | 1440 | 4 | 1 | 200M | 440M |
-| Falcon-TST<sub>large<sub> | 2 | 4 | 16 | 1024 | 4096 | 2880 | 4 | 1 | 1.2B | 2.5B |
-| Falcon-TST<sub>ultra<sub> | 3 | 4 | 16 | 1024 | 4096 | 2880 | 8 | 2 | 3.8B | 8.5B | -->
+We have currently developed three different-sized Falcon-TST models, as detailed in the table below:
 
 <div align="center">
 <img src="figures/model_configuration.png" alt="description" width="100%">
@@ -48,12 +44,16 @@ Falcon-TST is a cutting-edge time series foundation model that leverages the pow
 
 ### Performance
 
+Falcon-TST achieves state-of-the-art zero-shot results on well-acknowledged long-term forecasting benchmarks.
+
 <div align="center">
-<img src="figures/zero_shot.png" alt="description" width="70%">
+<img src="figures/zero_shot.png" alt="description" width="100%">
 </div>
 
 
 ### Inference Time on different devices
+
+The following figure domonstrates the inference time of Falcon-TST on different devices. As a billion-scale foudation model, Falcon-TST<sub>Large</sub> can make forecasts within 1 second even on CPU devices.
 
 <div align="center">
 <img src="figures/inference_time.png" alt="description" width="70%">
