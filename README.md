@@ -53,7 +53,7 @@ Falcon-TST achieves state-of-the-art zero-shot results on well-acknowledged long
 
 ### Inference Time on different devices
 
-The following figure domonstrates the inference time of Falcon-TST on different devices. As a billion-scale foudation model, Falcon-TST<sub>Large</sub> can make forecasts within 1 second even on CPU devices.
+The following figure domonstrates the inference time of Falcon-TST on different devices. As a billion-scale foundation model, Falcon-TST<sub>Large</sub> can make forecasts within 1 second even on CPU devices.
 
 <div align="center">
 <img src="figures/inference_time.png" alt="description" width="70%">
