@@ -1,6 +1,6 @@
 <div align="center">
 
-# PatchMoE: A Large-Scale Time Series Foundation Model
+# Falcon-TST: A Large-Scale Time Series Foundation Model
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
@@ -13,13 +13,13 @@
 
 ## 🚀 Latest News
 
-- 🚩 **News (2025.10)**: PatchMoE (large) is now available on [HuggingFace](https://huggingface.co/ant-intl/PatchMoE_Large)
+- 🚩 **News (2025.10)**: Falcon-TST (large) is now available on [HuggingFace](https://huggingface.co/ant-intl/PatchMoE_Large)
 - 📊 **Performance**: Achieved state-of-the-art results on multiple time series benchmarks
 - 🔧 **Integration**: Full compatibility with HuggingFace Transformers ecosystem
 
 ## 📖 Introduction
 
-PatchMoE is a cutting-edge time series foundation model that leverages the power of Mixture of Experts (MoE) architecture combined with multiple patch tokenizers. This innovative approach enables efficient processing of time series data while maintaining high accuracy across various forecasting tasks.
+Falcon-TST is a cutting-edge time series foundation model that leverages the power of Mixture of Experts (MoE) architecture combined with multiple patch tokenizers. This innovative approach enables efficient processing of time series data while maintaining high accuracy across various forecasting tasks.
 
 ### Key Features
 
@@ -38,13 +38,13 @@ PatchMoE is a cutting-edge time series foundation model that leverages the power
 
 | Model | <i>L<sub>MoE</sub></i> | <i>L<sub>Expert</sub></i> | Heads | <i>d<sub>model</sub></i> | <i>d<sub>ff</sub></i> | <i>L</i> | Experts | <i>k</i> | Average Activated Params | Total Params |
 |:-----:|:---------:|:------------:|:-----:|:------------:|:-----------:|:----:|:-------:|:---:|:---------:|:--------:|
-| PatchMoE<sub>base<sub> | 2 | 4 | 8 | 512 | 2048 | 1440 | 4 | 1 | 200M | 440M |
-| PatchMoE<sub>large<sub> | 2 | 4 | 16 | 1024 | 4096 | 2880 | 4 | 1 | 1.2B | 2.5B |
-| PatchMoE<sub>ultra<sub> | 3 | 4 | 16 | 1024 | 4096 | 2880 | 8 | 2 | 3.8B | 8.5B |
+| Falcon-TST<sub>base<sub> | 2 | 4 | 8 | 512 | 2048 | 1440 | 4 | 1 | 200M | 440M |
+| Falcon-TST<sub>large<sub> | 2 | 4 | 16 | 1024 | 4096 | 2880 | 4 | 1 | 1.2B | 2.5B |
+| Falcon-TST<sub>ultra<sub> | 3 | 4 | 16 | 1024 | 4096 | 2880 | 8 | 2 | 3.8B | 8.5B |
 
 ### Performance
 <!-- #### todo: figures and text
-PatchMoE achieves state-of-the-art performance on multiple time series forecasting benchmarks:
+Falcon-TST achieves state-of-the-art performance on multiple time series forecasting benchmarks:
 
 - **Time-Series-Library**: Ranked #1 in MSE/MAE metrics
 - **ETT Dataset**: Superior performance across all variants (ETTh1, ETTh2, ETTm1, ETTm2)
