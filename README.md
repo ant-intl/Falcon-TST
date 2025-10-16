@@ -36,11 +36,15 @@ Falcon-TST is a cutting-edge time series foundation model that leverages the pow
 
 ### Model Configurations
 
-| Model | <i>L<sub>MoE</sub></i> | <i>L<sub>Expert</sub></i> | Heads | <i>d<sub>model</sub></i> | <i>d<sub>ff</sub></i> | <i>L</i> | Experts | <i>k</i> | Average Activated Params | Total Params |
+<!-- | Model | <i>L<sub>MoE</sub></i> | <i>L<sub>Expert</sub></i> | Heads | <i>d<sub>model</sub></i> | <i>d<sub>ff</sub></i> | <i>L</i> | Experts | <i>k</i> | Average Activated Params | Total Params |
 |:-----:|:---------:|:------------:|:-----:|:------------:|:-----------:|:----:|:-------:|:---:|:---------:|:--------:|
 | Falcon-TST<sub>base<sub> | 2 | 4 | 8 | 512 | 2048 | 1440 | 4 | 1 | 200M | 440M |
 | Falcon-TST<sub>large<sub> | 2 | 4 | 16 | 1024 | 4096 | 2880 | 4 | 1 | 1.2B | 2.5B |
-| Falcon-TST<sub>ultra<sub> | 3 | 4 | 16 | 1024 | 4096 | 2880 | 8 | 2 | 3.8B | 8.5B |
+| Falcon-TST<sub>ultra<sub> | 3 | 4 | 16 | 1024 | 4096 | 2880 | 8 | 2 | 3.8B | 8.5B | -->
+
+<div align="center">
+<img src="figures/model_configuration.png" alt="description" width="100%">
+</div>
 
 ### Performance
 
