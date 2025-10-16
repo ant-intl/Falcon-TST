@@ -67,7 +67,7 @@ Falcon-TST is a cutting-edge time series foundation model that leverages the pow
 1. Clone the repository
 
 ```bash
-git clone https://github.com/patch-moe/Falcon-TST.git
+git clone https://github.com/ant-intl/Falcon-TST.git
 cd Falcon-TST
 ```
 
@@ -92,6 +92,11 @@ model = AutoModelForCausalLM.from_pretrained(
 # Prepare your time series data
 batch_size, lookback_length, channels = 1, 2880, 7
 time_series = torch.randn(batch_size, lookback_length, channels)
+
+# Load the model and data to the same device
+device = torch.cuda.current_device() if torch.cuda.is_available() else 'cpu'
+model = model.to(device)
+time_series = time_series.to(device)
 
 # Generate forecasts
 forecast_length = 96
