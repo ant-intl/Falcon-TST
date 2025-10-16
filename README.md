@@ -75,7 +75,7 @@ cd Falcon-TST
 
 - Python >= 3.8
 - PyTorch >= 2.0.0
-- transformers == 4.40.1
+- **transformers == 4.40.1**
 
 ### Code Example
 
