@@ -97,7 +97,6 @@ time_series = torch.randn(batch_size, lookback_length, channels)
 device = torch.cuda.current_device() if torch.cuda.is_available() else 'cpu'
 model = model.to(device)
 time_series = time_series.to(device)
-print(f'device: {device}')
 
 # Generate forecasts
 forecast_length = 96
