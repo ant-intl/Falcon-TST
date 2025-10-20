@@ -9,7 +9,7 @@ evaluation across all specified datasets.
 
 import torch
 from eval import Eval
-from transformers import AutoModelForCausalLM
+from transformers import AutoModel
 import argparse
 
 
@@ -45,7 +45,7 @@ if __name__ == "__main__":
 
         # Load pre-trained Falcon-TST model from checkpoint
         print(f"Loading model from: {args.ckpt_path}")
-        model = AutoModelForCausalLM.from_pretrained(
+        model = AutoModel.from_pretrained(
             args.ckpt_path,
             trust_remote_code=True
         ).to(device=args.device)

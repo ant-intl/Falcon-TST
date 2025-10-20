@@ -61,9 +61,9 @@ class Eval:
                 inputs, labels = batches["inputs"], batches["labels"]
                 
                 # Generate predictions using the model
-                model_output = model.generate(
-                    inputs, 
-                    max_new_tokens=self.args.pred_length
+                model_output = model.predict(
+                    time_series=inputs.to(self.args.device), 
+                    forecast_horizon=self.args.pred_length
                 )
 
                 # Convert tensors to numpy arrays for metric computation
@@ -77,14 +77,6 @@ class Eval:
         # Concatenate all batch results
         preds = np.concatenate(preds, axis=0)
         trues = np.concatenate(trues, axis=0)
-        
-        # Ensure consistent dimensionality for metric computation
-        trues = np.expand_dims(trues, axis=-1)
-        print("test shape:", preds.shape, trues.shape)
-        
-        # Reshape for proper metric calculation
-        preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
-        trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
         print("test shape:", preds.shape, trues.shape)
         
         # Compute evaluation metrics

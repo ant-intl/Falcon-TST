@@ -81,11 +81,11 @@ cd Falcon-TST
 
 ```python
 import torch
-from transformers import AutoModelForCausalLM, AutoConfig
+from transformers import AutoModel
 
 # Load pre-trained model (when available)
-model = AutoModelForCausalLM.from_pretrained(
-    'ant-intl/Falcon-TST_Large', 
+model = AutoModel.from_pretrained(
+    'ant-intl/Falcon-TST_Large',
     trust_remote_code=True
 )
 
@@ -97,10 +97,13 @@ time_series = torch.randn(batch_size, lookback_length, channels)
 device = torch.cuda.current_device() if torch.cuda.is_available() else 'cpu'
 model = model.to(device)
 time_series = time_series.to(device)
+print(f'device: {device}')
 
 # Generate forecasts
 forecast_length = 96
-predictions = model.generate(time_series, max_new_tokens=forecast_length)
+predictions = model.predict(time_series, forecast_horizon=forecast_length)
+
+print(predictions)
 ```
 
 ### Evaluation
