@@ -117,7 +117,7 @@ python run_eval.py --ckpt_path ant-intl/Falcon-TST_Large --root_path ./dataset -
 
 ### Advanced Usage
 
-More advanced usages like pre-training and fine-tuning examples are coming soon.
+More advanced usages like Megatron-LM-based pre-training and fine-tuning procedure, and flexible data distributed sampling of our datasets are coming soon.
 
 ## 🙏 Acknowledgments
 

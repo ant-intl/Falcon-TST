@@ -141,7 +141,6 @@ class Eval:
                                         f"{scenario_config}.csv")
             else:
                 csv_path = os.path.join(self.args.root_path, 
-                                        "ETT-small", 
                                         f"{scenario_config}.csv")
 
             # Initialize dataset and dataloader
