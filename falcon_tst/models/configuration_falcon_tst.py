@@ -1,24 +1,24 @@
 """
-Configuration class for Falcon-TST model.
-
-This module defines the configuration for Falcon-TST, a large-scale time series foundation model
+Configuration class for FalconTST model.
+This module defines the configuration for FalconTST, a large-scale time series foundation model
 that utilizes Mixture of Experts (MoE) architecture with multiple patch tokenizers.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Union
 from transformers import PretrainedConfig
+import torch
 
 
 class FalconTSTConfig(PretrainedConfig):
     """
-    Configuration class for Falcon-TST model.
-
-    Falcon-TST is a time series foundation model that uses Mixture of Experts architecture
+    Configuration class for FalconTST model.
+    
+    FalconTST is a time series foundation model that uses Mixture of Experts architecture
     with multiple patch tokenizers for efficient time series forecasting.
-
+    
     This configuration inherits from [`PretrainedConfig`] and can be used to control the model
     output. Read the documentation from [`PretrainedConfig`] for more information.
-
+    
     Args:
         hidden_size (`int`, *optional*, defaults to 1024):
             Dimensionality of the encoder layers and the pooler layer.
@@ -97,108 +97,107 @@ class FalconTSTConfig(PretrainedConfig):
         tie_word_embeddings (`bool`, *optional*, defaults to `False`):
             Whether to tie word embeddings.
     """
-
-    model_type = "falcon_tst"
-    keys_to_ignore_at_inference = ["past_key_values"]
-
+    
+    model_type = "FalconTST"
+    
     def __init__(
         self,
+        # model configs
+        add_bias_linear: bool = False,
+        num_hidden_layers: int = 3,
         hidden_size: int = 1024,
         ffn_hidden_size: int = 4096,
-        seq_length: int = 2880,
-        add_bias_linear: bool = False,
-        rope_theta: int = 10000,
-        num_hidden_layers: int = 3,
         num_attention_heads: int = 16,
+        seq_length: int = 2880,
         mask_pad_value: float = 255.0,
-        expert_num_layers: int = 4,
-        shared_patch_size: int = 64,
-        patch_size_list: Optional[List[int]] = None,
-        multi_forecast_head_list: Optional[List[int]] = None,
         is_revin: bool = True,
-        use_cpu_initialization: bool = False,
-        rotary_interleaved: bool = False,
-        do_expert_forecast: bool = True,
+        shared_patch_size: int = 32,
+        patch_size_list: Optional[List[int]] = None,
         residual_backcast: bool = True,
         do_base_forecast: bool = False,
-        heterogeneous_moe_layer: bool = True,
+        do_expert_forecast: bool = True,
+        heterogeneous_moe_layer: bool = False,
+        expert_num_layers: int = 4,
+        multi_forecast_head_list: Optional[List[int]] = None,
+        multi_forecast_head_type: str = "single",
+        rope_theta: int = 1000000,
+        rotary_interleaved: bool = False,
+        block_input_layernorm: bool = True,
+        # moe configs
+        num_experts: int = 4,
+        moe_router_topk: int = 2,
+        moe_router_pre_softmax: bool = True,
+        moe_router_score_function: str = "softmax",
+        moe_ffn_hidden_size: int = 4096,
+        moe_shared_expert_intermediate_size: int = 4096,
+        moe_router_enable_expert_bias: bool = False,
+        moe_expert_final_layernorm: bool = True,
+        # initial configs
+        use_cpu_initialization: bool = False,
+        init_method_std: float = 0.06,
+        initializer_range: float = 0.02,
+        # test configs
         test_data_seq_len: int = 2880,
         test_data_test_len: int = 720,
         autoregressive_step_list: Optional[List[int]] = None,
-        multi_forecast_head_type: str = "single",
-        num_experts: int = 4,
-        moe_router_topk: int = 2,
-        moe_ffn_hidden_size: int = 4096,
-        moe_shared_expert_intermediate_size: int = 4096,
-        init_method_std: float = 0.06,
-        initializer_range: float = 0.02,
-        moe_router_enable_expert_bias: bool = False,
-        moe_expert_final_layernorm: bool = True,
-        transformer_input_layernorm: bool = True,
-        moe_router_pre_softmax: bool = True,
-        q_layernorm: bool = False,
-        k_layernorm: bool = False,
-        moe_router_score_function: str = "softmax",
-        tie_word_embeddings: bool = False,
+        
         **kwargs,
     ):
-        """Initialize Falcon-TST configuration."""
-        # Set default values for list parameters
-        if patch_size_list is None:
-            patch_size_list = [96, 64, 48, 24]
-        if multi_forecast_head_list is None:
-            multi_forecast_head_list = [24, 96, 336]
-        if autoregressive_step_list is None:
-            autoregressive_step_list = [2, 4, 1]
+        """Initialize FalconTST configuration."""
         
-        # Falcon-TST inference specific
-        self.test_data_seq_len = test_data_seq_len
-        self.inference_length = test_data_test_len
-        self.autoregressive_step_list = autoregressive_step_list
-        self.multi_forecast_head_type = multi_forecast_head_type
-        self.use_cache = True
-
-        # Falcon-TST specific
+        # model configs
+        self.add_bias_linear = add_bias_linear
+        self.num_hidden_layers = num_hidden_layers
         self.hidden_size = hidden_size
         self.ffn_hidden_size = ffn_hidden_size
         self.num_attention_heads = num_attention_heads
-        self.init_method_std = init_method_std
-        self.initializer_range = initializer_range
-        self.seq_length = seq_length
-        self.multi_forecast_head_list = multi_forecast_head_list
         self.kv_channels = self.hidden_size // self.num_attention_heads
-        self.rotary_base = rope_theta
-        self.num_hidden_layers = num_hidden_layers
+        self.seq_length = seq_length
         self.mask_pad_value = mask_pad_value
-        self.pred_length = max(self.multi_forecast_head_list)
-        self.add_bias_linear = add_bias_linear
         self.is_revin = is_revin
+        self.shared_patch_size = shared_patch_size
+        if patch_size_list is None:
+            patch_size_list = [96, 64, 48, 24]
+        self.patch_size_list = patch_size_list
+        self.residual_backcast = residual_backcast
         self.do_base_forecast = do_base_forecast
         self.do_expert_forecast = do_expert_forecast
-        self.residual_backcast = residual_backcast
         self.heterogeneous_moe_layer = heterogeneous_moe_layer
-        self.use_cpu_initialization = use_cpu_initialization
-        self.rotary_interleaved = rotary_interleaved
-
-        # Expert specific
-        self.patch_size_list = patch_size_list
-        self.num_moe_experts = num_experts
-        self.shared_patch_size = shared_patch_size
         self.expert_num_layers = expert_num_layers
-        self.moe_router_input_size = self.seq_length
+        if multi_forecast_head_list is None:
+            multi_forecast_head_list = [24, 96, 336]
+        self.multi_forecast_head_list = multi_forecast_head_list
+        self.pred_length = max(self.multi_forecast_head_list)
+        self.multi_forecast_head_type = multi_forecast_head_type
+        self.rotary_base = rope_theta
+        self.rotary_interleaved = rotary_interleaved
+        self.block_input_layernorm = block_input_layernorm
+        
+        # moe configs
+        self.num_moe_experts = num_experts
         self.moe_router_topk = moe_router_topk
+        self.moe_router_input_size = self.seq_length
+        self.moe_router_pre_softmax = moe_router_pre_softmax
         self.moe_router_score_function = moe_router_score_function
         self.moe_ffn_hidden_size = moe_ffn_hidden_size
         self.moe_shared_expert_intermediate_size = moe_shared_expert_intermediate_size
         self.moe_router_enable_expert_bias = moe_router_enable_expert_bias
         self.moe_expert_final_layernorm = moe_expert_final_layernorm
-        self.transformer_input_layernorm = transformer_input_layernorm
-        self.moe_router_pre_softmax = moe_router_pre_softmax
-        self.q_layernorm = q_layernorm
-        self.k_layernorm = k_layernorm
 
-        kwargs.pop("tie_word_embeddings", None)
+        # initial configs
+        self.use_cpu_initialization = use_cpu_initialization
+        self.init_method_std = init_method_std
+        self.initializer_range = initializer_range
+
+        # test configs
+        self.test_data_seq_len = test_data_seq_len
+        self.inference_length = test_data_test_len
+        if autoregressive_step_list is None:
+            autoregressive_step_list = [2, 4, 1]
+        self.autoregressive_step_list = autoregressive_step_list
+        
+        self.use_cache = True
+        
         super().__init__(
-            tie_word_embeddings=tie_word_embeddings,
             **kwargs,
         )

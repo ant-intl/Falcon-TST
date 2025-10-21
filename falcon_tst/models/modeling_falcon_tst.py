@@ -1,22 +1,25 @@
 import torch
-from typing import Optional
+from torch._dynamo import config
+from typing import List, Optional, Union
 import torch.nn as nn
 import torch.nn.functional as F
+# import transformer_engine as te
 from torch import Tensor
 import math
+from einops import rearrange, repeat
 from functools import reduce
 from abc import ABC, abstractmethod
-from .configuration_falcon_tst import FalconTSTConfig
-from .ts_generation_mixin import FalconTSTGenerationMixin
-from transformers import PreTrainedModel
+from .configuration_FalconTST import FalconTSTConfig
+from transformers import PreTrainedModel, Cache, DynamicCache
+from transformers.activations import ACT2FN
+from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
+from transformers.modeling_outputs import MoeModelOutputWithPast, MoeCausalLMOutputWithPast
 
 
 def _rotate_half(x: Tensor, rotary_interleaved: bool) -> Tensor:
     """Change sign so the last dimension becomes [-odd, +even]
-
     Args:
         x (Tensor): Input tensor
-
     Returns:
         Tensor: Tensor rotated half
     """
@@ -31,20 +34,17 @@ def _rotate_half(x: Tensor, rotary_interleaved: bool) -> Tensor:
 
 
 def _apply_rotary_pos_emb_bshd(
-    t: Tensor,
-    freqs: Tensor,
-    rotary_interleaved: bool = False,
-    multi_latent_attention: bool = False,
-    mscale: float = 1.0,
-) -> Tensor:
+        t: Tensor,
+        freqs: Tensor,
+        rotary_interleaved: bool = False,
+        multi_latent_attention: bool = False,
+        mscale: float = 1.0,
+    ) -> Tensor:
     """Apply rotary positional embedding to input tensor T.
-
     check https://kexue.fm/archives/8265 for detailed formulas
-
     Args:
         t (Tensor): Input tensor T is of shape [seq_length, ... , dim]
         freqs (Tensor): Rotary Positional embedding tensor freq is of shape [seq_length, ..., dim]
-
     Returns:
         Tensor: The input tensor after applying RoPE
     """
@@ -68,81 +68,8 @@ def _apply_rotary_pos_emb_bshd(
     return torch.cat((t, t_pass), dim=-1)
 
 
-def topk_softmax_with_capacity(
-    logits: torch.Tensor,
-    topk: int,
-    use_pre_softmax: bool = False,
-    score_function: str = "softmax",
-    expert_bias: Optional[torch.Tensor] = None,
-):
-    """Apply capacity and padding to the top-k selection.
-    Args:
-        logits (torch.Tensor): Logits tensor.
-        topk (int): The number of experts to select for each token.
-        use_pre_softmax (bool): Whether to apply softmax or sigmoid before top-k selection.
-        score_function (str): The score function to use. Can be either "softmax" or "sigmoid".
-        expert_bias (torch.Tensor): The bias added to logits for expert routing.
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-            - routing_probs (torch.Tensor): A tensor of shape [num_tokens, num_experts] containing
-              the routing probabilities for each token to each expert.
-            - routing_map (torch.Tensor): A mask tensor of shape [num_tokens, num_experts]
-              indicating which experts were selected for each token. True values represent
-              the selected experts.
-            - tokens_per_expert (torch.Tensor): A tensor of shape [num_experts] containing
-              the number of local tokens assigned to each expert before dropping and padding.
-    """
-    assert logits.dim() == 2, f"Expected 2D logits [num_tokens, num_experts], got {logits.dim()}."
-
-    def compute_topk(
-        scores,
-        topk,
-    ):
-        return torch.topk(scores, k=topk, dim=1)
-
-    if score_function == "softmax":
-        if use_pre_softmax:
-            scores = torch.softmax(logits, dim=-1, dtype=torch.float32).type_as(logits)
-            probs, top_indices = compute_topk(
-                scores,
-                topk,
-            )
-        else:
-            scores, top_indices = compute_topk(
-                logits,
-                topk,
-            )
-            probs = torch.softmax(scores, dim=-1, dtype=torch.float32).type_as(logits)
-    elif score_function == "sigmoid":
-        scores = torch.sigmoid(logits.float()).type_as(logits)
-        if expert_bias is not None:
-            scores_for_routing = scores + expert_bias
-            _, top_indices = compute_topk(
-                scores_for_routing,
-                topk,
-            )
-            scores = torch.gather(scores, dim=1, index=top_indices).type_as(logits)
-        else:
-            scores, top_indices = compute_topk(
-                scores,
-                topk,
-            )
-        probs = scores / (scores.sum(dim=-1, keepdim=True) + 1e-20) if topk > 1 else scores
-    else:
-        raise ValueError(f"Invalid score_function: {score_function}")
-
-    # TODO Try using element-wise operations instead of scatter?
-    topk_masked_gates = torch.zeros_like(logits).scatter(1, top_indices, probs)
-    topk_map = torch.zeros_like(logits).int().scatter(1, top_indices, 1).bool()
-    # TODO: Reset topk_map to realize load-balancing?
-    tokens_per_expert = topk_map.sum(dim=0)
-
-    return topk_masked_gates, topk_map, tokens_per_expert
-
-
 class RotaryEmbedding(nn.Module):
     """Rotary Embedding.
-
     Args:
         kv_channels (int): Projection weights dimension in multi-head attention. Obtained
             from transformer config
@@ -165,7 +92,10 @@ class RotaryEmbedding(nn.Module):
 
         dim = kv_channels
         self.rotary_interleaved = rotary_interleaved
-        device = "cpu" if use_cpu_initialization else torch.cuda.current_device()
+        if use_cpu_initialization or not torch.cuda.is_available():
+            device = 'cpu'
+        else:
+            device = torch.cuda.current_device()
         self.inv_freq = 1.0 / (
             rotary_base ** (torch.arange(0, dim, 2, dtype=torch.float32, device=device) / dim)
         )
@@ -180,22 +110,19 @@ class RotaryEmbedding(nn.Module):
         freqs = torch.outer(seq, self.inv_freq)  # [seq len, dim]
         return freqs
 
-    def forward(
-        self, max_seq_len: int, offset: int = 0, packed_seq: bool = False, device=None
-    ) -> Tensor:
-        """Forward pass of RoPE embedding.
 
+    def forward(self, max_seq_len: int, offset: int = 0, packed_seq: bool = False, device=None) -> Tensor:
+        """Forward pass of RoPE embedding.
         Args:
             max_seq_len (int): Maximum size of sequence
             offset (int, optional): RoPE offset. Defaults to 0.
             packed_seq (bool, optional): Whether to use packed sequence. Defaults to False.
-
         Returns:
             Tensor: Embeddings after applying RoPE.
         """
         if device is None:
             device = self.inv_freq.device
-        if self.inv_freq.device.type == "cpu":
+        if self.inv_freq.device.type == 'cpu':
             # move `inv_freq` to GPU once at the first micro-batch forward pass
             self.inv_freq = self.inv_freq.to(device=device)
 
@@ -213,7 +140,7 @@ class RotaryEmbedding(nn.Module):
         return emb.to(device)
 
     def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
-        state_dict.pop(f"{prefix}inv_freq", None)
+        state_dict.pop(f'{prefix}inv_freq', None)
         return super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     def get_rotary_seq_len(
@@ -235,11 +162,6 @@ class IdentityOp(nn.Module):
         return x
 
 
-class IdentityFuncOp(nn.Module):
-    def forward(self, x):
-        return x
-
-
 class RMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-5):
         super().__init__()
@@ -247,9 +169,9 @@ class RMSNorm(nn.Module):
         self.variance_epsilon = eps
 
     def forward(self, hidden_states):
-        """
-        hidden_states [bs, patch_num, d_model]
-        """
+        '''
+            hidden_states [bs, patch_num, d_model]
+        '''
         input_dtype = hidden_states.dtype
         hidden_states = hidden_states.to(torch.float32)
         variance = hidden_states.pow(2).mean(-1, keepdim=True)
@@ -274,119 +196,82 @@ class TEDotProductAttention(nn.Module):
         self.softmax_scale = softmax_scale
         self.drop = nn.Dropout(attention_dropout)
 
-    def forward(
-        self,
-        q,
-        k,
-        v,
-        attention_mask,
-        causal=None,
-    ):
+    def forward(self, q, k, v, attention_mask):
         """Implements the multihead softmax attention.
         Arguments
         ---------
-            qkv: The tensor containing the query, key, and value. (B, S, 3, H, D)
-            causal: if passed, will override self.causal
-            key_padding_mask: boolean mask to apply to the attention weights. True means to keep,
-                False means to mask out. (B, S)
+            q,k,v: The tensor containing the query, key, and value.  [seq_len, batch_size, hidden_size]
+            attention_mask: boolean mask to apply to the attention weights. True means to keep,
+                False means to mask out. [batch_size, 1, seq_len, seq_len]
         """
-        causal = self.causal if causal is None else causal
-
-        q = q.transpose(0, 1).contiguous()
-        k = k.transpose(0, 1).contiguous()
-        v = v.transpose(0, 1).contiguous()
+        q = q.transpose(0,1).contiguous()
+        k = k.transpose(0,1).contiguous()
+        v = v.transpose(0,1).contiguous()
 
         batch_size, seq_len = q.shape[0], q.shape[1]
         softmax_scale = self.softmax_scale or 1.0 / math.sqrt(q.shape[-1])
         # scores
         scores = torch.einsum("bthd,bshd->bhts", q, k * softmax_scale)
-        scores = scores.masked_fill(attention_mask == 0, float("-1e9"))
+        scores = scores.masked_fill(attention_mask == 0, float('-1e9'))
         # Softmax
         attention = torch.softmax(scores, dim=-1, dtype=v.dtype)
         # Dropout
         attention_drop = self.drop(attention)
         output = torch.einsum("bhts,bshd->bthd", attention_drop, v)
-        output = output.reshape(batch_size, seq_len, -1).transpose(0, 1).contiguous()
+        output = output.reshape(batch_size, seq_len, -1)
+
+        output = output.transpose(0,1).contiguous()
         return output
 
 
 class SelfAttention(nn.Module):
-    def __init__(
-        self,
-        config,
-    ):
+    def __init__(self,config,):
         super().__init__()
         self.config = config
-        q_layernorm = config.q_layernorm
-        k_layernorm = config.k_layernorm
         self.hidden_size = config.hidden_size
         self.core_attention = TEDotProductAttention()
-        self.linear_proj = nn.Linear(
-            self.hidden_size,
-            self.hidden_size,
-            bias=config.add_bias_linear,
-        )
-        self.linear_qkv = nn.Linear(
-            self.hidden_size,
-            3 * self.hidden_size,
-            bias=config.add_bias_linear,
-        )
-        if q_layernorm:
-            self.q_layernorm = RMSNorm(self.hidden_size)
-        else:
-            self.q_layernorm = IdentityOp()
-        if k_layernorm:
-            self.k_layernorm = RMSNorm(self.hidden_size)
-        else:
-            self.k_layernorm = IdentityOp()
+        self.linear_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=config.add_bias_linear,)
+        self.linear_qkv =  nn.Linear(self.hidden_size, 3*self.hidden_size, bias=config.add_bias_linear,)
 
     def forward(self, x, attention_mask, rotary_pos_emb):
+        '''
+            x: [seq_len, batch_size, hidden_size]
+            attention_mask: [batch_size, 1, seq_len, seq_len]
+            rotary_pos_emb: [seq_len, 1, 1, kv_channels(hidden_size // num_heads)]
+        '''
         qkv = self.linear_qkv(x)
-        qkv = qkv.view(qkv.size(0), qkv.size(1), self.config.num_attention_heads, -1)
+        qkv = qkv.view(qkv.size(0), qkv.size(1), self.config.num_attention_heads, -1) 
         q, k, v = qkv.chunk(3, dim=-1)
 
-        # q/k norm
-        q = self.q_layernorm(q)
-        k = self.k_layernorm(k)
-        
         # Apply rotary encoding to q and k
         rotary_pos_emb = (rotary_pos_emb,) * 2
         q_pos_emb, k_pos_emb = rotary_pos_emb
         q = _apply_rotary_pos_emb_bshd(q, q_pos_emb)
         k = _apply_rotary_pos_emb_bshd(k, k_pos_emb)
 
-        # attention
+        # attention 
         attn_output = self.core_attention(q, k, v, attention_mask)
         output = self.linear_proj(attn_output)
         return output
 
 
+
 class MLP(nn.Module):
-    def __init__(self, config, in_features):
+    def __init__(self,config, in_features):
         super().__init__()
-        self.config = config
-        self.linear_fc1 = nn.Linear(
-            in_features,
-            self.config.moe_ffn_hidden_size * 2,
-            bias=self.config.add_bias_linear,
-        )
-        self.linear_fc2 = nn.Linear(
-            self.config.moe_ffn_hidden_size,
-            self.config.hidden_size,
-            bias=self.config.add_bias_linear,
-        )
+        self.config= config
+        self.linear_fc1 = nn.Linear(in_features, self.config.moe_ffn_hidden_size*2, bias=self.config.add_bias_linear,)
+        self.linear_fc2 = nn.Linear(self.config.moe_ffn_hidden_size, self.config.hidden_size, bias=self.config.add_bias_linear,)
 
     def forward(self, x):
         x = self.swiglu(self.linear_fc1(x))
         x = self.linear_fc2(x)
         return x
 
-    def swiglu(self, y):
+    def swiglu(self,y):
         """Performs SwiGLU (Swish-Gated Linear Unit) activation function.
-
         Args:
             y (torch.Tensor): Input tensor to be split into two halves along the last dimension.
-
         Returns:
             torch.Tensor: Result of SwiGLU activation: SiLU(y1) * y2, where y1, y2 are the split halves.
         """
@@ -407,6 +292,11 @@ class TransformerLayer(nn.Module):
         self.mlp = MLP(config, self.config.hidden_size)
 
     def forward(self, x, attention_mask, rotary_pos_emb):
+        '''
+            x: [seq_len, batch_size, hidden_size]
+            attention_mask: [batch_size, 1, seq_len, seq_len]
+            rotary_pos_emb: [seq_len, 1, 1, kv_channels(hidden_size // num_heads)]
+        '''
         residual = x
         x = self.input_layernorm(x)
         x = self.self_attention(x, attention_mask, rotary_pos_emb)
@@ -418,113 +308,78 @@ class TransformerLayer(nn.Module):
         return x
 
 
-class FalconTSTExpert_v2(nn.Module):
-    def __init__(self, config, patch_input_size=32, expert_output_size=336, final_layernorm=True):
+class FalconTSTExpert(nn.Module):
+    def __init__(self, config, patch_input_size=32,expert_output_size=336,final_layernorm=True):
         super().__init__()
         self.config = config
-        self.patch_size = patch_input_size
+        self.patch_size= patch_input_size
         self.seq_length = config.seq_length
-        assert (
-            self.seq_length % self.patch_size == 0
-        ), f"invalid patch_size: {self.patch_size} when seq_length={self.seq_length}"
+        assert self.seq_length % self.patch_size == 0, f'invalid patch_size: {self.patch_size} when seq_length={self.seq_length}'
         self.patch_num = self.seq_length // self.patch_size
         self.flatten_size = self.patch_num * self.config.hidden_size
 
-        self.layers = nn.ModuleList(
-            [
-                TransformerLayer(config, input_layernorm=config.transformer_input_layernorm)
-                for _ in range(self.config.expert_num_layers)
-            ]
-        )
+        self.layers = nn.ModuleList([
+            TransformerLayer(config,input_layernorm=config.transformer_input_layernorm) 
+            for _ in range(self.config.expert_num_layers)
+        ])
         if final_layernorm:
             self.final_layernorm = RMSNorm(self.config.hidden_size)
         else:
             self.final_layernorm = IdentityOp()
         self.patch_embedding = MLP(config, in_features=patch_input_size)
-        self.output_layer = nn.Linear(
-            in_features=self.flatten_size,
-            out_features=expert_output_size,
-            bias=False,
-        )
+        self.output_layer =  nn.Linear(in_features=self.flatten_size, out_features=expert_output_size, bias=False,)
+
 
     def _forward_patch_embedding(
         self,
-        input: Tensor,  # [batch_size, seq_len]
+        input: Tensor,                      # [batch_size, seq_len]
     ):
         """
         Perform patch embedding on the input time series.
-
-        This method applies a linear transformation to the input tensor to
+        This method applies a linear transformation to the input tensor to 
         convert it into patches and then embeds these patches using a linear layer.
         """
         batch_size, seq_len = input.shape
-        assert (
-            seq_len == self.seq_length
-        ), f"Expected sequence length {self.seq_length}, but got {seq_len}"
+        assert seq_len == self.seq_length, f'Expected sequence length {self.seq_length}, but got {seq_len}'
 
         # Create input_mask based on pad_length
         # When a time point is masked, its value is mask_pad_value(default:255.)
-        input_mask = (
-            input != self.config.mask_pad_value
-        )  # 0: mask, 1: unmask   [batch_size, seq_len]
+        input_mask = (input != self.config.mask_pad_value) # 0: mask, 1: unmask   [batch_size, seq_len]
 
         # so whether the masked value 0 has the same effective of attention_mask
-        input_data = input * input_mask  # [batch_size, seq_len]
+        input_data = input * input_mask     # [batch_size, seq_len]
 
         # Patchify the input
-        input_data = input_data.unfold(
-            dimension=-1, size=self.patch_size, step=self.patch_size
-        ).contiguous()  # input [batch_size, patch_num, patch_size]
-        hidden_states = self.patch_embedding(
-            input_data
-        )  # hidden_states [batch_size, patch_num, hidden_size]
-        hidden_states = hidden_states.transpose(
-            0, 1
-        ).contiguous()  # hidden_states [patch_num, batch_size, hidden_size], To adapt to the Megatron
+        input_data = input_data.unfold(dimension=-1, size=self.patch_size, step=self.patch_size).contiguous() # input [batch_size, patch_num, patch_size]
+        hidden_states= self.patch_embedding(input_data)                 # hidden_states [batch_size, patch_num, hidden_size]
+        hidden_states = hidden_states.transpose(0, 1).contiguous()      # hidden_states [patch_num, batch_size, hidden_size], To adapt to the Megatron
 
         # Patchify the mask: only the entire time points in a patch are masked then this patch is masked
-        attention_mask = input_mask.unfold(
-            dimension=-1, size=self.patch_size, step=self.patch_size
-        ).contiguous()  # [batch_size, patch_num, patch_size]
-        attention_mask = (
-            attention_mask.sum(-1) == self.patch_size
-        )  # [batch_size, patch_num]   # 0: mask, 1: unmask
-        attention_mask[:, -1] = True  # The last patch is not masked
+        attention_mask = input_mask.unfold(dimension=-1, size=self.patch_size, step=self.patch_size).contiguous()   # [batch_size, patch_num, patch_size]
+        attention_mask = (attention_mask.sum(-1) == self.patch_size)  # [batch_size, patch_num]   # 0: mask, 1: unmask
+        attention_mask[:, -1] = True    # The last patch is not masked
         _, patch_num = attention_mask.shape
-        attention_mask = attention_mask.unsqueeze(2).repeat(
-            1, 1, patch_num
-        ) * attention_mask.unsqueeze(1).repeat(
-            1, patch_num, 1
-        )  # [batch_size, patch_num, patch_num]
-        attention_mask = attention_mask.unsqueeze(
-            1
-        ).contiguous()  # [batch_size, 1, patch_num, patch_num]
+        attention_mask = attention_mask.unsqueeze(2).repeat(1,1,patch_num) * attention_mask.unsqueeze(1).repeat(1,patch_num,1)  # [batch_size, patch_num, patch_num]
+        attention_mask = attention_mask.unsqueeze(1).contiguous()   # [batch_size, 1, patch_num, patch_num]
 
         return hidden_states, attention_mask, input_mask
 
-    def _forward_output(
-        self, hidden_states, output_scale=None, input_mask=None, inference_context=None
-    ):
+    def _forward_output(self, hidden_states, output_scale=None, input_mask=None):
         """
-        Perform a forward pass through the output layer.
-
-        Args:
-            expert_input (Tensor): Expert input of shape [batch_size, seq_len]
-            hidden_states (Tensor): Transformed hidden states of shape [patch_num, batch_size, hidden_size]
-            output_scale (Tensor, optional): Expert probabilities for the output layer  [batch_size]
-            input_mask (Tensor, optional): Expert input mask of shape [batch_size, seq_len], 0:mask, 1:unmask
-
-        Returns:
-            expert_output (Tensor): Expert output of shape [batch_size, expert_output_size]
+            Perform a forward pass through the output layer.
+            Args:
+                hidden_states (Tensor): Transformed hidden states of shape [patch_num, batch_size, hidden_size]
+                output_scale (Tensor, optional): Expert probabilities for the output layer  [batch_size]
+                input_mask (Tensor, optional): Expert input mask of shape [batch_size, seq_len], 0:mask, 1:unmask
+            Returns:
+                expert_output (Tensor): Expert output of shape [batch_size, expert_output_size]
         """
 
         # [patch_num, batch_size, hidden_size] -> [batch_size, flatten_size (patch_num * hidden_size)]
         patch_num, batch_size, hidden_size = hidden_states.shape
-        assert (
-            patch_num * hidden_size
-        ) == self.flatten_size, f"patch_num ({patch_num}) * hidden_size ({hidden_size}) != flatten_size ({self.flatten_size})"
+        assert (patch_num * hidden_size) == self.flatten_size, f'patch_num ({patch_num}) * hidden_size ({hidden_size}) != flatten_size ({self.flatten_size})'
         hidden_states = hidden_states.transpose(0, 1).reshape(-1, self.flatten_size).contiguous()
-        expert_output = self.output_layer(hidden_states)  # [batch_size, expert_output_size]
+        expert_output = self.output_layer(hidden_states)   # [batch_size, expert_output_size]
         if output_scale is not None:
             original_dtype = expert_output.dtype
             expert_output = expert_output * output_scale.unsqueeze(-1)
@@ -534,31 +389,33 @@ class FalconTSTExpert_v2(nn.Module):
 
     def forward(self, expert_input, rotary_pos_emb, expert_probs=None):
         hidden_states, attention_mask, input_mask = self._forward_patch_embedding(expert_input)
+        # hidden_states:  [patch_num, batch_size, hidden_size]
+        # attention_mask: [batch_size, 1, patch_num, patch_num]
+        # input_mask:     [batch_size, seq_len]
+
         for layer in self.layers:
-            hidden_states = layer(
-                hidden_states, attention_mask, rotary_pos_emb[: hidden_states.shape[0]]
-            )
+            hidden_states = layer(hidden_states, attention_mask, rotary_pos_emb[:hidden_states.shape[0]])
+        
         hidden_states = self.final_layernorm(hidden_states)
+
         expert_output = self._forward_output(hidden_states, expert_probs, input_mask)
         return expert_output
 
 
 class SequentialFalconTST(nn.Module):
-    def __init__(self, config, expert_output_size=336):
+    def __init__(self, config,expert_output_size=336):
         super().__init__()
         self.config = config
         self.expert_output_size = expert_output_size
-        self.local_experts = nn.ModuleList(
-            [
-                FalconTSTExpert_v2(
-                    config,
-                    expert_output_size=expert_output_size,
-                    patch_input_size=config.patch_size_list[expert_id],
-                    final_layernorm=config.moe_expert_final_layernorm,
-                )
-                for expert_id in range(config.num_moe_experts)
-            ]
-        )
+        self.local_experts = nn.ModuleList([
+                            FalconTSTExpert(
+                                config,
+                                expert_output_size=expert_output_size,
+                                patch_input_size=config.patch_size_list[expert_id],
+                                final_layernorm=config.moe_expert_final_layernorm
+                            )
+                            for expert_id in range(config.num_moe_experts)
+                        ])
 
     def forward(self, input, routing_map, rotary_pos_emb, expert_probs):
         expert_output_list = []
@@ -566,19 +423,15 @@ class SequentialFalconTST(nn.Module):
 
         for i, expert in enumerate(self.local_experts):
             token_mask = routing_map[:, i].bool()  # shape (batch,)
-            current_inputs = input[token_mask]  # (num_tokens_for_expert, seq_len)
-            current_probs = expert_probs[token_mask, i]
+            current_inputs = input[token_mask]     # (num_tokens_for_expert, seq_len)
+            current_probs  = expert_probs[token_mask, i]
 
             if current_inputs.numel() == 0:
-                expert_output = torch.zeros(
-                    0, self.expert_output_size, device=input.device, dtype=input.dtype
-                )
+                expert_output = torch.zeros(0, self.expert_output_size, device=input.device, dtype=input.dtype)
             else:
                 expert_output = expert(current_inputs, rotary_pos_emb, current_probs)
 
-            full_output = torch.zeros(
-                batch_size, self.expert_output_size, device=input.device, dtype=input.dtype
-            )
+            full_output = torch.zeros(batch_size, self.expert_output_size, device=input.device, dtype=input.dtype)
             full_output[token_mask] = expert_output
             expert_output_list.append(full_output)
 
@@ -586,179 +439,47 @@ class SequentialFalconTST(nn.Module):
         return expert_output
 
 
-class RouterGatingLinearFunction(torch.autograd.Function):
-    """
-    Autograd function for router gating linear.
-    """
-
-    @staticmethod
-    def forward(ctx, inp: torch.Tensor, weight: torch.Tensor, router_dtype: torch.dtype):
-        """
-        Forward pass of the RouterGatingLinearFunction function.
-        """
-        ctx.router_dtype = router_dtype
-        ctx.input_dtype = inp.dtype
-        ctx.weight_dtype = weight.dtype
-        inp_shape = inp.shape
-        inp = inp.view(-1, inp_shape[-1])
-
-        output = torch.mm(inp.to(router_dtype), weight.to(router_dtype).t())
-
-        output = output.view(*inp_shape[:-1], -1)
-        return output
-
-
-def router_gating_linear(inp: torch.Tensor, weight: torch.Tensor, router_dtype: torch.dtype):
-    """
-    Customized linear layer for router gating.
-    This linear layer accepts bfloat16 input and weight, and can return output with router_dtype.
-    It can reduce the memory usage by avoiding saving the intermediate high precision tensors.
-    """
-    return RouterGatingLinearFunction.apply(inp, weight, router_dtype)
-
-
-class Router(ABC, nn.Module):
-    """Base Router class"""
-
-    def __init__(
-        self,
-        config: FalconTSTConfig,
-    ) -> None:
-        """
-        Initialize the Router module.
-
-        Args:
-            config (TransformerConfig): Configuration object for the Transformer model.
-            model_comm_pgs (ModelCommProcessGroups, optional): Process groups for MoE operations.
-        """
+class TopKRouter(nn.Module):
+    def __init__(self, config: FalconTSTConfig):
         super().__init__()
         self.config = config
+        self.topk = config.moe_router_topk
 
-        # Initialize the gate weights.
-
-        if self.config.patch_size_list is not None:
-            assert self.config.moe_router_input_size is not None
-            self.weight = torch.nn.Parameter(
-                torch.empty(
-                    (self.config.num_moe_experts, self.config.moe_router_input_size),
-                    dtype=torch.float32,
-                )
-            )
-        else:
-            self.weight = torch.nn.Parameter(
-                torch.empty(
-                    (self.config.num_moe_experts, self.config.hidden_size), dtype=torch.float32
-                )
-            )
+        self.weight = nn.Parameter(
+            torch.empty((config.num_moe_experts, config.moe_router_input_size), dtype=torch.float32)
+        )
         self.reset_parameters()
 
     def reset_parameters(self):
-        """Reset the router parameters."""
-        torch.nn.init.normal_(self.weight, mean=0, std=self.config.init_method_std)
-        self.weight.data = self.weight.data.to(dtype=self.config.torch_dtype)
+        nn.init.normal_(self.weight, mean=0, std=self.config.init_method_std)
 
-    def gating(self, input: torch.Tensor):
-        """Forward pass of the router gate.
-
-        Args:
-            input (torch.Tensor): Input tensor.
-
-        Returns:
-            torch.Tensor: Logits tensor.
-        """
-        if self.weight.device != input.device:
-            self.weight = self.weight.to(input.device)
-        router_dtype = input.dtype
-        logits = router_gating_linear(input, self.weight, router_dtype)
-        return logits
-
-    @abstractmethod
     def routing(self, logits: torch.Tensor):
-        """Routing function.
+        score_function = self.config.moe_router_score_function
 
-        Args:
-            logits (torch.Tensor): Logits tensor.
-
-        Returns:
-            Tuple[torch.Tensor, torch.Tensor]: A tuple containing token assignment
-            probabilities and mapping.
-        """
-        raise NotImplementedError("Routing function not implemented.")
-
-    @abstractmethod
-    def forward(self, input: torch.Tensor):
-        """
-        Forward pass of the router.
-
-        Args:
-            input (torch.Tensor): Input tensor.
-        """
-        raise NotImplementedError("Forward function not implemented.")
-
-
-class TopKRouter(Router):
-    """Route each token to the top-k experts."""
-
-    def __init__(
-        self,
-        config: FalconTSTConfig,
-    ) -> None:
-        """Initialize the zero token dropping router.
-
-        Args:
-            config (TransformerConfig): The configuration for the transformer model.
-            model_comm_pgs (ModelCommProcessGroups, optional): Process groups for MoE operations.
-        """
-        super().__init__(config=config)
-        self.topk = self.config.moe_router_topk
-        self.score_function = self.config.moe_router_score_function
-
-        self.enable_expert_bias = self.config.moe_router_enable_expert_bias
-        if self.enable_expert_bias:
-            self.register_buffer(
-                "local_tokens_per_expert",
-                torch.zeros(self.config.num_moe_experts, dtype=torch.float32),
-                persistent=False,
-            )
-            self.register_buffer(
-                "expert_bias", torch.zeros(self.config.num_moe_experts, dtype=torch.float32)
-            )
+        if score_function == "softmax":
+            if self.config.moe_router_pre_softmax:
+                scores = torch.softmax(logits, dim=-1, dtype=torch.float32).type_as(logits)
+                probs, top_indices = torch.topk(scores, self.topk, dim=1)
+            else:
+                scores, top_indices = torch.topk(logits, self.topk, dim=1)
+                probs = torch.softmax(scores, dim=-1, dtype=torch.float32).type_as(logits)
         else:
-            self.local_tokens_per_expert = None
-            self.expert_bias = None
+            raise NotImplementedError
+        
+        routing_probs = torch.zeros_like(logits).scatter_(1, top_indices, probs)
+        routing_map = torch.zeros_like(logits, dtype=torch.bool).scatter_(1, top_indices, True)
 
-    def routing(self, logits: torch.Tensor):
-        """Top-k routing function
-
-        Args:
-            logits (torch.Tensor): Logits tensor after gating.
-
-        Returns:
-            probs (torch.Tensor): The probabilities of token to experts assignment.
-            routing_map (torch.Tensor): The mapping of token to experts assignment,
-                with shape [num_tokens, num_experts].
-        """
-        logits = logits.view(-1, self.config.num_moe_experts)
-
-        scores, routing_map, tokens_per_expert = topk_softmax_with_capacity(
-            logits,
-            self.topk,
-            use_pre_softmax=self.config.moe_router_pre_softmax,
-            score_function=self.score_function,
-            expert_bias=self.expert_bias,
-        )
-        return scores, routing_map
-
+        return routing_probs, routing_map
+    
     def forward(self, input: torch.Tensor):
-        """
-        Forward pass of the router.
+        if self.weight.device != input.device:
+            self.weight.data = self.weight.data.to(input.device)
+        
+        gating_logits = F.linear(input, self.weight)
+        num_tokens = gating_logits.shape[:-1].numel()
+        gating_logits = gating_logits.view(num_tokens, self.config.num_moe_experts)
 
-        Args:
-            input (torch.Tensor): Input tensor.
-        """
-        logits = self.gating(input)
-
-        scores, routing_map = self.routing(logits)
+        scores, routing_map = self.routing(gating_logits)
 
         return scores, routing_map
 
@@ -787,47 +508,39 @@ class FalconTSTMoELayer(nn.Module):
             self.backcast_layernorm = RMSNorm(self.seq_length)
 
         self.experts = SequentialFalconTST(
-            config,
-            expert_output_size=self.expert_output_size,
-        )
-        self.shared_experts = FalconTSTExpert_v2(
-            config,
-            expert_output_size=self.expert_output_size,
-            patch_input_size=config.shared_patch_size,
-            final_layernorm=config.moe_expert_final_layernorm,
-        )
+                                config,
+                                expert_output_size=self.expert_output_size,
+                            )
+        self.shared_experts = FalconTSTExpert(config,
+                                expert_output_size=self.expert_output_size,
+                                patch_input_size=config.shared_patch_size,
+                                final_layernorm=config.moe_expert_final_layernorm)
 
     def time_series_preprocess(self, input: torch.Tensor):
         """
-        Preprocess time series(sample) for dispatch.
-
-        Applies RevIN to input time series(sample), and process the input mask (0: mask, 1: unmask)
-
-        Args:
-            input (torch.Tensor): The input time series (samples) to the MoE layer. [batch_size, seq_len]
-
-        Returns:
-            input (torch.Tensor): The (RevIN) backcast time series (samples). [batch_size, seq_len]
-            means (torch.Tensor): The means of the non-masked backcast time series (samples). [batch_size, 1]
-            stdev (torch.Tensor): The standard deviation of the non-masked backcast time series (samples). [batch_size, 1]
+            Preprocess time series(sample) for dispatch.
+            Applies RevIN to input time series(sample), and process the input mask (0: mask, 1: unmask)
+            Args:
+                input (torch.Tensor): The input time series (samples) to the MoE layer. [batch_size, seq_len]
+            Returns:
+                input (torch.Tensor): The (RevIN) backcast time series (samples). [batch_size, seq_len]
+                means (torch.Tensor): The means of the non-masked backcast time series (samples). [batch_size, 1]
+                stdev (torch.Tensor): The standard deviation of the non-masked backcast time series (samples). [batch_size, 1]
         """
 
         batch_size, seq_len = input.shape
-        assert seq_len == self.seq_length, f"seq_len {seq_len} != self.seq_length {self.seq_length}"
+        assert seq_len == self.seq_length, f'seq_len {seq_len} != self.seq_length {self.seq_length}'
 
         # Create input_mask based on pad_length
         # When a time point is masked, its value is mask_pad_value(default:255.)
-        input_mask = (
-            input != self.config.mask_pad_value
-        )  # 0: mask, 1: unmask   [batch_size, seq_len]
-
+        input_mask = (input != self.config.mask_pad_value) # 0: mask, 1: unmask   [batch_size, seq_len]
+        
         self.input_mask = input_mask
-
+        
         return input
-
+    
     def router_and_preprocess(self, backcast: torch.Tensor):
         """Compute and preprocess time series(sample) routing for dispatch.
-
         This method uses the router to determine which experts to send each time series(sample) to,
         producing routing probabilities and a mapping. It then preprocesses the
         input time series (samples) and probabilities for the time series(sample) dispatcher. The original
@@ -836,25 +549,22 @@ class FalconTSTMoELayer(nn.Module):
         # backcast [batch_size, seq_len]    means/stdev [batch_size, 1]
         backcast = self.time_series_preprocess(backcast)
 
-        residual = backcast  # residual: [batch_size, seq_len], the input to the shared experts
+        residual = backcast                   # residual: [batch_size, seq_len], the input to the shared experts
 
         # TODO: Check the effective of the masked value to the router
-        probs, routing_map = self.router(
-            backcast * self.input_mask
-        )  # probs/routing_map: [batch_size, num_experts]
+        probs, routing_map = self.router(backcast * self.input_mask)    # probs/routing_map: [batch_size, num_experts]
 
         return backcast, probs, residual, routing_map
 
     def experts_compute(
         self,
-        input: torch.Tensor,  # [num_permuted_samples_after_dispatch, seq_len]
-        probs: torch.Tensor,  # [num_permuted_samples_after_dispatch]
-        residual: torch.Tensor,  # [batch_size, seq_len]
+        input: torch.Tensor,            # [num_permuted_samples_after_dispatch, seq_len]
+        probs: torch.Tensor,            # [num_permuted_samples_after_dispatch]
+        residual: torch.Tensor,         # [batch_size, seq_len]
         rotary_pos_emb: torch.Tensor,
-        routing_map: torch.Tensor,  # [seq_len, 1, 1, kv_channels(hidden_size // num_heads)]
+        routing_map:torch.Tensor,   # [seq_len, 1, 1, kv_channels(hidden_size // num_heads)]
     ):
         """Computes the output of the experts on the dispatched time series(sample).
-
         This method first post-processes the dispatched input to get permuted time series(sample)
         for each expert. It then passes the time series(sample) through the local experts.
         If a shared expert is configured and not overlapped with communication,
@@ -863,19 +573,51 @@ class FalconTSTMoELayer(nn.Module):
         """
         # shared_expert_output: [batch_size, seq_len (+ pred_len)]
         shared_experts_output = self.shared_experts(residual, rotary_pos_emb)
-
+        
         # dispatched_input (global_input_tokens):   [num_permuted_samples_after_dispatch_postprocess(sorted), seq_len]
         # tokens_per_expert (global_probs):         [num_experts]
         # permuted_probs (global_probs):            [num_permuted_samples_after_dispatch_postprocess(sorted)]
-
+        
         experts_output = self.experts(input, routing_map, rotary_pos_emb, probs)
-
+        
         return experts_output, shared_experts_output
+    
+    def combine(
+        self,
+        experts_output: torch.Tensor,
+        shared_experts_output: torch.Tensor,
+    ):
+        """Combines expert outputs via communication and adds shared expert output.
+        This method uses the time series(sample) dispatcher to combine the outputs from different
+        experts. It then adds the output from the shared expert if it exists.
+        """
+        assert experts_output.shape == shared_experts_output.shape,\
+             f'experts_output shape {experts_output.shape} doesn\'t equal to shared_experts_output shape:{shared_experts_output.shape}'
+        output = experts_output + shared_experts_output
+
+        if self.is_last_layer and self.config.heterogeneous_moe_layer:
+            output_backcast = None
+            output_forecast = output
+            assert output_forecast.shape[1] == self.pred_length, \
+                f'heterogeneous_moe_layer=True, expected the last moe layer\'s output pred len: {self.pred_length}, but got {output_forecast.shape[1]}'
+        else:
+            #  Noting: the mask time point there maybe not mask_pad_value(default:255.), it will be postprocessed
+            output_backcast = output[:, :self.seq_length]   # [batch_size, seq_len]
+            
+            if self.config.do_expert_forecast:
+                output_forecast = output[:, self.seq_length:]   # [batch_size, pred_len]
+                assert output_forecast.shape[1] == self.pred_length, \
+                    f'do_expert_forecast=True, expected the last moe layer\'s output pred len: {self.pred_length}, but got {output_forecast.shape[1]}'
+            else:
+                output_forecast = None
+        
+        return output_backcast, output_forecast
+
 
     def postprocess(
-        self,
-        backcast: torch.Tensor,  # [batch_size, seq_len]
-        forecast: torch.Tensor,  # [batch_size, pred_len]
+        self, 
+        backcast: torch.Tensor,         # [batch_size, seq_len]
+        forecast: torch.Tensor,         # [batch_size, pred_len]
         output_backcast: torch.Tensor,  # [batch_size, seq_len]
         output_forecast: torch.Tensor,  # [batch_size, pred_len]
     ):
@@ -885,91 +627,57 @@ class FalconTSTMoELayer(nn.Module):
             forecast (torch.Tensor): The previous layer's forecast time series (samples).                   [batch_size, pred_len]
             output_backcast (torch.Tensor): The current layer's output backcast time series (samples).      [batch_size, seq_len]
             output_forecast (torch.Tensor): The current layer's output forecast time series (samples).      [batch_size, pred_len]
-            means (torch.Tensor): The means of the non-masked backcast time series (samples).               [batch_size, 1]
-            stdev (torch.Tensor): The standard deviation of the non-masked backcast time series (samples).  [batch_size, 1]
-            backcast_mask (torch.Tensor): The previous layer's backcast mask of time series (samples) .     [batch_size, seq_len]
         """
-        if output_backcast is not None:
-            output_backcast = self.backcast_layernorm(output_backcast)  # LayerNorm
+        if output_backcast is not None:    
+            # 25/8/14 @modified by xiaming replace the revin with layernorm after the moe layer
+            # And if we multiply the output_backcast with the input mask, the performance will be hurted
+            output_backcast = self.backcast_layernorm(output_backcast) # LayerNorm
             if self.config.residual_backcast:
                 output_backcast = backcast - output_backcast
 
-            output_backcast[~self.input_mask] = (
-                self.config.mask_pad_value
-            )  # Important! Recover the mask time point back to mask_pad_value(default:255.)
-
-        if (
-            self.config.do_expert_forecast and forecast is not None
-        ):  # The first layer's forecast is None
+            output_backcast[~self.input_mask] = self.config.mask_pad_value   # Important! Recover the mask time point back to mask_pad_value(default:255.)
+        
+        if self.config.do_expert_forecast and forecast is not None: # The first layer's forecast is None
             output_forecast = forecast + output_forecast
-
+        
         return output_backcast, output_forecast
 
-    def combine(
-        self,
-        experts_output: torch.Tensor,
-        shared_experts_output: torch.Tensor,
-    ):
-        """Combines expert outputs via communication and adds shared expert output.
-
-        This method uses the time series(sample) dispatcher to combine the outputs from different
-        experts (e.g., via an All-to-All communication). It then adds the output
-        from the shared expert if it exists.
-        """
-        assert (
-            experts_output.shape == shared_experts_output.shape
-        ), f"experts_output shape {experts_output.shape} doesn't equal to shared_experts_output shape:{shared_experts_output.shape}"
-        output = experts_output + shared_experts_output
-
-        if self.is_last_layer and self.config.heterogeneous_moe_layer:
-            output_backcast = None
-            output_forecast = output
-            assert (
-                output_forecast.shape[1] == self.pred_length
-            ), f"heterogeneous_moe_layer=True, expected the last moe layer's output pred len: {self.pred_length}, but got {output_forecast.shape[1]}"
-        else:
-            #  Noting: the mask time point there maybe not mask_pad_value(default:255.), it will be postprocessed
-            output_backcast = output[:, : self.seq_length]  # [batch_size, seq_len]
-
-            if self.config.do_expert_forecast:
-                output_forecast = output[:, self.seq_length :]  # [batch_size, pred_len]
-                assert (
-                    output_forecast.shape[1] == self.pred_length
-                ), f"do_expert_forecast=True, expected the last moe layer's output pred len: {self.pred_length}, but got {output_forecast.shape[1]}"
-            else:
-                output_forecast = None
-
-        return output_backcast, output_forecast
 
     def forward(self, backcast, forecast, rotary_pos_emb):
         inputs, probs, residual, routing_map = self.router_and_preprocess(backcast)
-        experts_output, shared_experts_output = self.experts_compute(
-            inputs, probs, residual, rotary_pos_emb, routing_map
-        )
+        experts_output, shared_experts_output = self.experts_compute(inputs, probs, residual, rotary_pos_emb, routing_map)
         output_backcast, output_forecast = self.combine(experts_output, shared_experts_output)
-        output_backcast, output_forecast = self.postprocess(
-            backcast, forecast, output_backcast, output_forecast
-        )
+        output_backcast, output_forecast = self.postprocess(backcast, forecast, output_backcast, output_forecast)
         return output_backcast, output_forecast
 
 
 class FalconTSTBlock(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, input_layernorm = True):
         super().__init__()
         self.config = config
-        self.layers = nn.ModuleList(
-            [
-                FalconTSTMoELayer(config, layer_num + 1)
-                for layer_num in range(self.config.num_hidden_layers)
-            ]
-        )
+
+        if input_layernorm:
+            self.input_layernorm = RMSNorm(self.config.seq_length)
+        else:
+            self.input_layernorm = IdentityOp()
+        
+        self.layers = nn.ModuleList([
+            FalconTSTMoELayer(config, layer_num + 1)
+            for layer_num in range(self.config.num_hidden_layers)
+        ])
 
     def forward(self, x, rotary_pos_emb):
         backcast = x
         forecast = None
+
+        input_mask = (backcast != self.config.mask_pad_value)
+        backcast = self.input_layernorm(backcast * input_mask)
+        backcast[~input_mask] = self.config.mask_pad_value
+
         for layer in self.layers:
             backcast, forecast = layer(backcast, forecast, rotary_pos_emb)
-        return backcast, forecast
+        return backcast,forecast
+
 
 
 class FalconTSTPreTrainedModel(PreTrainedModel):
@@ -997,94 +705,91 @@ class FalconTSTModel(FalconTSTPreTrainedModel):
     def __init__(self, config: FalconTSTConfig):
         super().__init__(config)
         self.config = config
-        self.seq_length = config.seq_length
+        self.seq_length = self.config.seq_length
         self.rotary_pos_emb = RotaryEmbedding(
             kv_channels=self.config.kv_channels,
-            rotary_base=config.rotary_base,
+            rotary_base=self.config.rotary_base,
             use_cpu_initialization=self.config.use_cpu_initialization,
-            rotary_interleaved=self.config.rotary_interleaved,
+            rotary_interleaved=self.config.rotary_interleaved
         )
-        self.decoder = FalconTSTBlock(config=config)
+        self.decoder = FalconTSTBlock(
+            config=config,
+            input_layernorm=self.config.block_input_layernorm
+        )
         if self.config.do_expert_forecast and self.config.heterogeneous_moe_layer:
             self.output_layer = IdentityOp()
         else:
-            self.output_layer = nn.Linear(
-                in_features=self.seq_length,
-                out_features=self.config.pred_length,
-                bias=self.config.add_bias_linear,
-            )
+            self.output_layer = nn.Linear(in_features=self.seq_length, 
+                                          out_features=self.config.pred_length, 
+                                          bias=self.config.add_bias_linear,)
+
 
     def revin(
         self,
-        input: Tensor,  # [batch_size, seq_len]
-        input_mask: Tensor,  # [batch_size, seq_len] 0:mask, 1:unmask
+        input: Tensor,          # [batch_size, seq_len]
+        input_mask: Tensor,     # [batch_size, seq_len] 0:mask, 1:unmask
     ):
-        """Normalization from Non-stationary Transformer"""
+        """ Normalization from Non-stationary Transformer"""
 
         input_data = input * input_mask
-        sum_per_sample = torch.sum(
-            input_data, dim=1, keepdim=True
-        ).detach()  # [batch_size, 1], torch.bfloat16
-        count_per_sample = torch.sum(
-            input_mask, dim=1, keepdim=True
-        ).detach()  # [batch_size, 1], torch.int64
-        assert (
-            torch.any(count_per_sample == 0) == False
-        ), f"There is zero in count_per_sample, shape: {input[torch.where(count_per_sample.squeeze(1) == 0)[0]]}"
-        means = sum_per_sample / count_per_sample  # [batch_size, 1]
+        sum_per_sample = torch.sum(input_data, dim=1, keepdim=True).detach()                 # [batch_size, 1], torch.bfloat16
+        count_per_sample = torch.sum(input_mask, dim=1, keepdim=True).detach()               # [batch_size, 1], torch.int64
+        assert torch.any(count_per_sample == 0) == False, \
+            f'There is zero in count_per_sample, shape: {input[torch.where(count_per_sample.squeeze(1) == 0)[0]]}'
+        means = sum_per_sample / count_per_sample                                            # [batch_size, 1]
         input_data = input_data - means
         input_data = input_data * input_mask
-        var_per_sample = (
-            torch.sum(input_data**2, dim=1, keepdim=True).detach() / count_per_sample
-        )  # [batch_size, 1]
+        var_per_sample = torch.sum(input_data ** 2, dim=1, keepdim=True).detach() / count_per_sample # [batch_size, 1]
         stdev = torch.sqrt(var_per_sample + 1e-9)
         input_data = input_data / stdev
         input_data = input_data * input_mask
 
-        # recover the mask_pad_value(default:255.)
+        #recover the mask_pad_value(default:255.)
         input = input * ~(input_mask) + input_data
 
         return input, means, stdev
 
     def forward(self, input, revin):
+        
         batch_size, input_len = input.shape
+        # realize varied input length
         if input_len > self.seq_length:
-            input = input[:, -self.seq_length :]
+            input = input[:, -self.seq_length:]
         elif input_len < self.seq_length:
             pad_len = self.seq_length - input_len
-            input = F.pad(
-                input, pad=(pad_len, 0), mode="constant", value=self.config.mask_pad_value
-            )
+            input = F.pad(input, pad=(pad_len, 0), mode='constant', value=self.config.mask_pad_value)
         input_len = self.seq_length
 
-        input_mask = input != self.config.mask_pad_value
+        input_mask = (input != self.config.mask_pad_value)
 
         # Step1. RevIN
         if revin:
             input, means, stdev = self.revin(input, input_mask)
-
+        
         # Step2. Get rotary_pos_emb
         # rotary_pos_emb [input_len, 1, 1, kv_channels(hidden_size // num_heads)]
         rotary_pos_emb = self.rotary_pos_emb(input_len, device=input.device)
 
         # Step3. Do one-step inference to get mixed forecasts from multiple forecast heads
-        # mixed_pred: [batch_size, sum(multi_forecast_head)]
+        # mixed_pred: [batch_size, max(multi_forecast_head)]
         mixed_pred = self._inference_step(
-            input=input, input_mask=input_mask, rotary_pos_emb=rotary_pos_emb
+            input=input, 
+            input_mask=input_mask, 
+            rotary_pos_emb=rotary_pos_emb
         )
 
-        # Step4. Based on the mixed forecasts, do auto-regressive inference according to
+        # Step4. Based on the mixed forecasts, do auto-regressive inference according to 
         # the step list of each forecast head
-        if self.config.multi_forecast_head_type == "single":
+        if self.config.multi_forecast_head_type == 'single':
             final_output = self._auto_regressive_single_head(
-                input=input,
-                input_mask=input_mask,
-                falcon_tst_forecast=mixed_pred,
-                rotary_pos_emb=rotary_pos_emb,
+                input=input, 
+                input_mask=input_mask, 
+                FalconTST_forecast=mixed_pred, 
+                rotary_pos_emb=rotary_pos_emb
             )
         else:
             raise NotImplementedError
-
+        
         # Step5. RevIN
         if revin:
             final_output = final_output * (stdev.repeat(1, self.config.inference_length))
@@ -1093,58 +798,57 @@ class FalconTSTModel(FalconTSTPreTrainedModel):
         return final_output.detach().float()
 
     def _inference_step(
-        self,
-        input,
-        input_mask,
+        self, 
+        input, 
+        input_mask, 
         rotary_pos_emb,
-    ):
+    ):  
         if self.config.do_base_forecast:
-            base_forecast, _ = self.base_output_layer(input)
+            base_forecast, _ = self.base_output_layer(input * input_mask)
         else:
             base_forecast = None
 
         decoder_backcast, decoder_forecast = self.decoder(
-            input,  # [batch_size, seq_len]
-            rotary_pos_emb,  # [input_len, 1, 1, kv_channels(hidden_size // num_heads)]
+            input,               # [batch_size, seq_len]
+            rotary_pos_emb,      # [input_len, 1, 1, kv_channels(hidden_size // num_heads)]
         )
 
         if self.config.do_expert_forecast:
-            assert decoder_forecast is not None, f"decoder_forecast is None"
+            assert decoder_forecast is not None, f'decoder_forecast is None'
             if self.config.heterogeneous_moe_layer:
                 decoder_forecast = self.output_layer(decoder_forecast)  # IdentityOp
             else:
-                final_forecast = self.output_layer(decoder_backcast * input_mask)
+                final_forecast= self.output_layer(decoder_backcast * input_mask)
                 decoder_forecast = decoder_forecast + final_forecast
         else:
             # The decoder_backcast contains the mask_pad_val(default:255.)
             decoder_forecast, _ = self.output_layer(decoder_backcast * input_mask)
 
         if self.config.do_base_forecast:
-            assert base_forecast is not None, f"base_forecast is None"
-            falcon_tst_forecast = base_forecast + decoder_forecast
+            assert base_forecast is not None, f'base_forecast is None'
+            FalconTST_forecast = base_forecast + decoder_forecast
         else:
-            falcon_tst_forecast = decoder_forecast
-
-        return falcon_tst_forecast
+            FalconTST_forecast = decoder_forecast
+        
+        return FalconTST_forecast
 
     def _auto_regressive_single_head(
         self,
-        input,  # [batch_size, seq_len]
-        input_mask,  # [batch_size, seq_len]
-        falcon_tst_forecast,  # [batch_size, max(multi_forecast_head)]
-        rotary_pos_emb,  # [seq_len, 1, 1, kv_channels(hidden_size // num_heads)]
-        auto_regressive_strategy="from_long_to_short",
+        input,               # [batch_size, seq_len]
+        input_mask,          # [batch_size, seq_len]
+        FalconTST_forecast,   # [batch_size, max(multi_forecast_head)]
+        rotary_pos_emb,      # [seq_len, 1, 1, kv_channels(hidden_size // num_heads)]
+        auto_regressive_strategy='from_long_to_short'
     ):
         """auto regressive prediction with [single] head"""
-        assert (
-            self.config.multi_forecast_head_type == "single"
-        ), f"_auto_regressive_single_head only support multi_forecast_head_type==single "
+        assert self.config.multi_forecast_head_type == 'single', \
+            f'_auto_regressive_single_head only support multi_forecast_head_type==single '
 
-        if auto_regressive_strategy == "from_long_to_short":
+        if auto_regressive_strategy == 'from_long_to_short':
             # From long to short
             multi_forecast_head_list = sorted(self.config.multi_forecast_head_list, reverse=True)
 
-            final_output = falcon_tst_forecast
+            final_output = FalconTST_forecast
             while final_output.shape[1] < self.config.inference_length:
                 # adaptive choose the forecast head
                 remain_pred_len = self.config.inference_length - final_output.shape[1]
@@ -1154,173 +858,80 @@ class FalconTSTModel(FalconTSTPreTrainedModel):
                 if idx == len(multi_forecast_head_list):
                     idx = len(multi_forecast_head_list) - 1
                 head_pred_len = multi_forecast_head_list[idx]
-
+                
                 # one-step model prediction
-                input = torch.cat([input, falcon_tst_forecast], dim=1)[
-                    :, -self.seq_length :
-                ].contiguous()
+                input = torch.cat([input, FalconTST_forecast], dim=1)[:, -self.seq_length:].contiguous()
                 input_mask = torch.cat(
-                    [
-                        input_mask,
-                        torch.ones(
-                            falcon_tst_forecast.shape,
-                            dtype=input_mask.dtype,
-                            device=input_mask.device,
-                        ),
-                    ],
-                    dim=1,
-                )[
-                    :, -self.seq_length :
-                ].contiguous()  # 0:mask, 1:unmask
+                    [input_mask,
+                    torch.ones(FalconTST_forecast.shape, dtype=input_mask.dtype, device=input_mask.device)],
+                    dim=1)[:, -self.seq_length:].contiguous()   # 0:mask, 1:unmask
 
-                falcon_tst_forecast = self._inference_step(
-                    input=input,
-                    input_mask=input_mask,
-                    rotary_pos_emb=rotary_pos_emb,
+                FalconTST_forecast = self._inference_step(
+                    input=input, 
+                    input_mask=input_mask, 
+                    rotary_pos_emb=rotary_pos_emb, 
                 )
 
                 # the core idea of multi forecast head type of [single]
-                falcon_tst_forecast = falcon_tst_forecast[:, :head_pred_len]
+                FalconTST_forecast = FalconTST_forecast[:, :head_pred_len]
+                
+                final_output = torch.cat([final_output, FalconTST_forecast], dim=1)
+            
+            final_output = final_output[:, :self.config.inference_length]
 
-                final_output = torch.cat([final_output, falcon_tst_forecast], dim=1)
-
-            final_output = final_output[:, : self.config.inference_length]
-
-        elif auto_regressive_strategy == "from_short_to_long":
-            # From short to long
-            # in validate_args, it has been sorted, and check the valid config
-            multi_forecast_head_list = sorted(self.config.multi_forecast_head_list)
-            multi_forecast_head_dict = {}
-            for idx, head_pred_len in enumerate(self.config.multi_forecast_head_list):
-                if idx == len(multi_forecast_head_list) - 1:
-                    ar_step = math.ceil(self.config.inference_length / head_pred_len)
-                else:
-                    ar_step = min(
-                        self.config.autoregressive_step_list[idx],
-                        self.config.multi_forecast_head_list[idx + 1]
-                        // self.config.multi_forecast_head_list[idx],
-                    )
-                    # ar_step = multi_forecast_head_list[idx + 1] // multi_forecast_head_list[idx]
-
-                multi_forecast_head_dict[head_pred_len] = ar_step
-
-            # the core idea of strategy [from_short_to_long]
-            mixed_pred = falcon_tst_forecast
-            output_list = []
-            cur_pred = None
-            cur_pred_len = 0
-
-            # from the first(shortest) as begining
-            for idx, head_pred_len in enumerate(self.config.multi_forecast_head_list):
-                # assert cur_pred_len <= head_pred_len, \
-                # "Accumulated prediction length exceeds the prediction length of current forecast head"
-
-                ar_step = multi_forecast_head_dict[head_pred_len]
-                if ar_step == 0:
-                    # Ignore the current forecast head
-                    continue
-
-                # Add current head's first auto-regressive step of prediction
-                head_pred = mixed_pred[:, :head_pred_len]  # [single]
-                output_list.append(head_pred[:, cur_pred_len:])
-                cur_pred = torch.cat(output_list, dim=1)
-                cur_pred_len = cur_pred.shape[1]
-                if cur_pred_len >= self.config.inference_length:
-                    break
-
-                # Do auto-regressive of the rest of the steps
-                for _ in range(1, ar_step + 1):
-                    # one-step model prediction
-                    cur_input = torch.cat([input, cur_pred], dim=1)[
-                        :, -self.seq_length :
-                    ].contiguous()
-                    cur_input_mask = torch.cat(
-                        [
-                            input_mask,
-                            torch.ones(
-                                cur_pred.shape, dtype=input_mask.dtype, device=input_mask.device
-                            ),
-                        ],
-                        dim=1,
-                    )[
-                        :, -self.seq_length :
-                    ].contiguous()  # 0:mask, 1:unmask
-
-                    falcon_tst_forecast = self._inference_step(
-                        input=cur_input,
-                        input_mask=cur_input_mask,
-                        rotary_pos_emb=rotary_pos_emb,
-                    )
-
-                    head_pred = falcon_tst_forecast[:, :head_pred_len]
-                    output_list.append(head_pred)
-                    cur_pred = torch.cat(output_list, dim=1)
-                    cur_pred_len = cur_pred.shape[1]
-                    if cur_pred_len >= self.config.inference_length:
-                        break
-
-                if cur_pred_len >= self.config.inference_length:
-                    break
-
-            final_output = cur_pred[
-                :, : self.config.inference_length
-            ]  # [batch_size, inference_len]
+        else:
+            raise NotImplementedError
 
         assert final_output.shape[1] == self.config.inference_length
         return final_output
 
 
-class FalconTSTForPrediction(FalconTSTPreTrainedModel, FalconTSTGenerationMixin):
+class FalconTSTForPrediction(FalconTSTPreTrainedModel):
     def __init__(self, config: FalconTSTConfig):
         super().__init__(config)
         self.config = config
         self.model = FalconTSTModel(self.config)
         self.post_init()
 
-    def forward(
+    @torch.no_grad()
+    def predict(
         self,
-        input_ids: torch.FloatTensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        labels: Optional[torch.FloatTensor] = None,
-        return_dict: Optional[bool] = False,
-        max_output_length: Optional[int] = None,
-        revin: Optional[bool] = False,
-    ):
-        self.model.config.inference_length = max_output_length
-        outputs = self.model(input=input_ids, revin=revin)
-
-        loss = None
-        logits = outputs
-
-        if labels is not None:
-            loss_fn = nn.MSELoss()
-            loss = loss_fn(logits, labels)
-
-        if not return_dict:
-            output = (logits,)
-            return ((loss,) + output) if loss is not None else output
-
-        return logits
-
-    def prepare_inputs_for_generation(
-        self,
-        input_ids,
-        past_key_values=None,
-        attention_mask=None,
-        inputs_embeds=None,
-        revin=False,
-        **kwargs,
-    ):
+        time_series: torch.Tensor,
+        forecast_horizon: int,
+        revin: bool = True,
+    ) -> torch.Tensor:
         """
-        Prepare model inputs for autoregressive generation.
+        Generates time series forecasts autoregressively.
+        Args:
+            time_series (torch.Tensor): Input time series data. 
+                                        Shape: [batch_size, seq_len] or [batch_size, seq_len, channels].
+            forecast_horizon (int): The number of future time steps to predict.
+        Returns:
+            torch.Tensor: The forecasted time series. Shape: [batch_size, forecast_horizon, channels].
         """
+        self.eval()
 
-        model_inputs = {"input_ids": input_ids}
+        assert time_series.ndim == 2 or time_series.ndim == 3, "Input shape must be [batch, seq_len, channel] or [batch, seq_len]"
+        is_multichannel = time_series.ndim == 3
+        if is_multichannel:
+            batch_size, seq_len, num_channels = time_series.shape
+            # [B, L, C] -> [B * C, L]
+            input_flat = time_series.permute(0, 2, 1).reshape(batch_size * num_channels, seq_len)
+        else:
+            batch_size, seq_len = time_series.shape
+            num_channels = 1
+            input_flat = time_series
+        
+        self.config.inference_length = forecast_horizon
+        forecast_flat = self.model(
+            input=input_flat,
+            revin=revin
+        ) # Shape: [B * C, H]
 
-        model_inputs.update(
-            {
-                "revin": revin,
-            }
-        )
-
-        return model_inputs
+        if is_multichannel:
+            forecast = forecast_flat.reshape(batch_size, num_channels, forecast_horizon)
+            forecast = forecast.permute(0, 2, 1).contiguous()
+        else:
+            forecast = forecast_flat
+        
+        return forecast

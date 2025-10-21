@@ -13,12 +13,10 @@ from .modeling_falcon_tst import (
     FalconTSTModel,
     FalconTSTPreTrainedModel,
 )
-from .ts_generation_mixin import FalconTSTGenerationMixin
 
 __all__ = [
     "FalconTSTConfig",
     "FalconTSTForPrediction",
     "FalconTSTModel", 
     "FalconTSTPreTrainedModel",
-    "FalconTSTGenerationMixin",
 ]
