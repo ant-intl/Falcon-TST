@@ -1,83 +1,80 @@
 <div align="center">
 
-# Falcon-TST: A Large-Scale Time Series Foundation Model
+# Falcon-TST: A Family of Large-Scale Time Series Foundation Model
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-red.svg)](https://pytorch.org/)
-[![Transformers](https://img.shields.io/badge/🤗%20Transformers-4.40.1-yellow.svg)](https://huggingface.co/transformers/)
 
-**A large-scale time series foundation model utilizing Mixture of Experts (MoE) architecture with multiple patch tokenizers for efficient and accurate time series forecasting.**
+**A family of large-scale time series foundation models for efficient and accurate time series forecasting.**
 
 </div>
 
 ## 🚀 Latest News
 
-- 🚩 **News (2025.10)**: Falcon-TST (large) is now available on [HuggingFace](https://huggingface.co/ant-intl/Falcon-TST_Large)
-- 📊 **Performance**: Achieved state-of-the-art results on multiple time series benchmarks
-- 🔧 **Integration**: Full compatibility with HuggingFace Transformers ecosystem
+- **[Jun 2026]:** 🌐 Falcon-X API is now available! See [here](falconx/README.md) for details.
 
-## 📖 Introduction
+- **[May 2026]:** 🚀 Released our multivariate foundation model version Falcon-X [![arXiv](https://img.shields.io/badge/arXiv-b31b1b.svg)](http://arxiv.org/abs/2605.27286). 
 
-Falcon-TST is a cutting-edge time series foundation model that leverages the power of Mixture of Experts (MoE) architecture combined with multiple patch tokenizers. This innovative approach enables efficient processing of time series data while maintaining high accuracy across various forecasting tasks.
+- **[Oct 2025]:** 🚩 Falcon-1.0 is now available on [HuggingFace](https://huggingface.co/ant-intl/Falcon-TST_Large)
 
-### Key Features
-
-- **Multi-Scale Patch Tokenizers**: Utilizes multiple patch tokenizers to capture comprehensive temporal patterns
-- **Mixture of Experts**: Efficient routing mechanism for scalable model capacity
-- **Flexible Input / Output Length**: Supports arbitrary input and output length
-
+Comparison of MASE on the GIFT-Eval benchmark:
 
 <div align="center">
-<img src="figures/falcon_tst_framework.png" alt="description" width="100%">
-</div>
-
-<!-- ![Falcon-TST Architecture Overview](figures/falcon_tst_framework.png) -->
-
-### Model Configurations
-
-We have currently developed three different-sized Falcon-TST models, as detailed in the table below:
-
-<div align="center">
-<img src="figures/model_configuration.png" alt="description" width="100%">
-</div>
-
-### Performance
-
-Falcon-TST achieves state-of-the-art zero-shot results on well-acknowledged long-term forecasting benchmarks.
-
-<div align="center">
-<img src="figures/zero_shot.png" alt="description" width="100%">
-</div>
-
-
-### Inference Time on different devices
-
-The following figure domonstrates the inference time of Falcon-TST on different devices. As a billion-scale foundation model, Falcon-TST<sub>Large</sub> can make forecasts within 1 second even on CPU devices.
-
-<div align="center">
-<img src="figures/inference_time.png" alt="description" width="70%">
+<img src="falconx/figures/gift_eval_results.png" alt="description" width="100%">
 </div>
 
 
 ## 🚀 Quick Start
 
-### Installation
+### Falcon-X
 
-1. Clone the repository
+Falcon-X is a multivariate time series foundation model designed for heterogeneous variate modeling through a shared latent prototype space and dual-dependency modeling.
+
+#### Installation
 
 ```bash
-git clone https://github.com/ant-intl/Falcon-TST.git
-cd Falcon-TST
+pip install falcon-tst
 ```
 
-2. Install the following dependencies
+#### Code Example
+
+```python
+import numpy as np
+from falcontst import FalconClient
+
+# Prepare inputs
+B, L, H = 32, 512, 96
+context = np.random.randn(B, L)
+input_mask = np.ones_like(context)
+
+client = FalconClient()
+result = client.quantile_predict(
+    context=context,
+    prediction_length=H,
+    model_name="Falcon-X",
+    input_mask=input_mask,  # 1 = observed, 0 = missing
+    is_multivariate=True,
+)
+
+print(result)
+```
+
+For detailed API usage, parameters, and output format, see [falconx/README.md](falconx/README.md).
+
+### Falcon-1.0
+
+Falcon-1.0 is a hierarchical mixture-of-experts time series foundation model that integrates patch-wise expert specialization with sample-wise hierarchical routing.
+
+#### Installation
+
+Install the following dependencies
 
 - Python >= 3.8
 - PyTorch >= 2.0.0
 - **transformers == 4.40.1**
 
-### Code Example
+#### Code Example
 
 ```python
 import torch
@@ -105,21 +102,6 @@ predictions = model.predict(time_series, forecast_horizon=forecast_length)
 print(predictions)
 ```
 
-### Evaluation
-
-+ Prepare the benchmark datasets
-
-You can access the well-acknowledged long-term forecast datasets from [[Google Drive]](https://drive.google.com/drive/folders/1ZOYpTUa82_jCcxIdTmyr0LXQfvaM9vIy), and place the datasets under `./dataset`.
-
-+ Benchmark evaluation on ETTh1
-
-```bash
-python run_eval.py --ckpt_path ant-intl/Falcon-TST_Large --root_path ./dataset --test_data_list ETTh1
-```
-
-### Advanced Usage
-
-More advanced usages like Megatron-LM-based pre-training and fine-tuning procedure, and flexible data distributed sampling of our datasets are coming soon.
 
 ## 🙏 Acknowledgments
 
@@ -127,9 +109,20 @@ We sincerely thank all researchers and organizations who have contributed to the
 
 Special thanks to:
 - Megatron-LM (https://github.com/NVIDIA/Megatron-LM)
-- Time-MoE (https://github.com/Time-MoE/Time-MoE)
-- Time-300B (https://huggingface.co/datasets/Maple728/Time-300B)
-- Time-Series-Library (https://github.com/thuml/Time-Series-Library)
+- Chronos (https://github.com/amazon-science/chronos-forecasting)
+- GIFT-Eval (https://github.com/SalesforceAIResearch/gift-eval)
+
+## 📚 Citation
+If you find this repo useful, please consider citing our paper as follows:
+```bibtex
+@article{liu2026falconx,
+      title={Falcon-X: A Time Series Foundation Model for Heterogeneous Multivariate Modeling}, 
+      author={Yiding Liu and Yifan Hu and Hongjie Xia and Peiyuan Liu and Hongzhou Chen and Xilin Dai and Zewei Dong and Jiang-Ming Yang},
+      journal={arXiv preprint arXiv:2605.27286},
+      year={2026}
+}
+```
+
 
 ## 📄 License
 
