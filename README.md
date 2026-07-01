@@ -12,6 +12,8 @@
 
 ## 🚀 Latest News
 
+- **[Jul 2026]:** 🌐 Falcon-2.0 API is now available! See [here](falcon2/README.md) for details.
+
 - **[Jun 2026]:** 🌐 Falcon-X API is now available! See [here](falconx/README.md) for details.
 
 - **[May 2026]:** 🚀 Released our multivariate foundation model version Falcon-X [![arXiv](https://img.shields.io/badge/arXiv-b31b1b.svg)](http://arxiv.org/abs/2605.27286). 
@@ -26,6 +28,43 @@ Comparison of MASE on the GIFT-Eval benchmark:
 
 
 ## 🚀 Quick Start
+
+### Falcon-2.0
+
+Falcon-2.0 is a univariate encoder-only time series foundation model based on ORBIT (**O**mni-**R**ange **B**ootstrap **I**ncremental **T**raining).
+
+#### Installation
+
+```bash
+pip install falcon-tst
+```
+
+#### Code Example
+
+```python
+import numpy as np
+from falcontst import FalconClient
+
+# Prepare inputs
+batch_size = 32
+context_length = 512
+prediction_length = 96
+
+context = np.random.randn(batch_size, context_length)
+input_mask = np.ones_like(context)
+
+client = FalconClient()
+result = client.quantile_predict(
+    context=context,
+    prediction_length=prediction_length,
+    model_name="Falcon-2.0",
+    input_mask=input_mask  # 1 = observed, 0 = missing
+)
+
+print(result)
+```
+
+For detailed API usage, parameters, and output format, see [falcon2/README.md](falcon2/README.md).
 
 ### Falcon-X
 
