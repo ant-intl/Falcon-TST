@@ -23,7 +23,7 @@
 Comparison of MASE on the GIFT-Eval benchmark:
 
 <div align="center">
-<img src="falconx/figures/gift_eval_results.png" alt="description" width="100%">
+<img src="falcon2/figures/gift_eval_results.png" alt="description" width="100%">
 </div>
 
 
