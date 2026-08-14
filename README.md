@@ -12,11 +12,9 @@
 
 ## 🚀 Latest News
 
-- **[Jul 2026]:** 🌐 Falcon-2.0 API is now available! See [here](falcon2/README.md) for details.
+- **[Aug 2026]:** 🚀 Released **Falcon-2.0**, our latest time-series foundation model, together with its technical report [![arXiv](https://img.shields.io/badge/arXiv-b31b1b.svg)](https://arxiv.org/abs/2608.13262) and [API](falcon2/README.md).
 
-- **[Jun 2026]:** 🌐 Falcon-X API is now available! See [here](falconx/README.md) for details.
-
-- **[May 2026]:** 🚀 Released our multivariate foundation model version Falcon-X [![arXiv](https://img.shields.io/badge/arXiv-b31b1b.svg)](http://arxiv.org/abs/2605.27286). 
+- **[Jun 2026]:** 🚀 Released **Falcon-X**, our multivariate time-series foundation model [![arXiv](https://img.shields.io/badge/arXiv-b31b1b.svg)](https://arxiv.org/abs/2605.27286), followed by the launch of its [API](falconx/README.md).
 
 - **[Oct 2025]:** 🚩 Falcon-1.0 is now available on [HuggingFace](https://huggingface.co/ant-intl/Falcon-TST_Large)
 
