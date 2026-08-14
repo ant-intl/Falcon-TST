@@ -150,13 +150,20 @@ Special thanks to:
 - GIFT-Eval (https://github.com/SalesforceAIResearch/gift-eval)
 
 ## 📚 Citation
-If you find this repo useful, please consider citing our paper as follows:
+If you find this repo useful, please consider citing our papers as follows:
 ```bibtex
 @article{liu2026falconx,
-      title={Falcon-X: A Time Series Foundation Model for Heterogeneous Multivariate Modeling}, 
-      author={Yiding Liu and Yifan Hu and Hongjie Xia and Peiyuan Liu and Hongzhou Chen and Xilin Dai and Zewei Dong and Jiang-Ming Yang},
-      journal={arXiv preprint arXiv:2605.27286},
-      year={2026}
+  title={Falcon-X: A Time Series Foundation Model for Heterogeneous Multivariate Modeling},
+  author={Liu, Yiding and Hu, Yifan and Xia, Hongjie and Liu, Peiyuan and Chen, Hongzhou and Dai, Xilin and Dong, Zewei and Yang, Jiang-Ming},
+  journal={arXiv preprint arXiv:2605.27286},
+  year={2026}
+}
+
+@article{xia2026falcon2,
+  title={Into the ORBIT for Time Series: Training Regimes for Foundation Models},
+  author={Xia, Hongjie and Liu, Yiding and Hu, Yifan and Liu, Peiyuan and Dong, Zewei},
+  journal={arXiv preprint arXiv:2608.13262},
+  year={2026}
 }
 ```
 
