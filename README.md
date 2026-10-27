@@ -12,6 +12,8 @@
 
 ## 🚀 Latest News
 
+- **[Sep 2026]:** 🎉 **Falcon-X** has been accepted to **NeurIPS 2026**, and **Falcon-2.0** to the FMTS Workshop at NeurIPS 2026. See you in Sydney!
+
 - **[Aug 2026]:** 🚀 Released **Falcon-2.0**, our latest time-series foundation model, together with its technical report [![arXiv](https://img.shields.io/badge/arXiv-b31b1b.svg)](https://arxiv.org/abs/2608.13262) and [API](falcon2/README.md).
 
 - **[Jun 2026]:** 🚀 Released **Falcon-X**, our multivariate time-series foundation model [![arXiv](https://img.shields.io/badge/arXiv-b31b1b.svg)](https://arxiv.org/abs/2605.27286), followed by the launch of its [API](falconx/README.md).
