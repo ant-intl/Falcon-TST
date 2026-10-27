@@ -12,7 +12,7 @@
 
 ## 🚀 Latest News
 
-- **[Sep 2026]:** 🎉 Our **Falcon-X** and **[ORCA](https://arxiv.org/abs/2606.14222)** ([Code](https://github.com/Fifthky/ORCA)) have been accepted to **NeurIPS 2026**, and **Falcon-2.0** to the **[FMTS Workshop at NeurIPS 2026](https://fmts-workshop.github.io/)**! Together, these works advance our research toward online time series applications, spanning foundation modeling and black-box online adaptation. See you in Sydney!
+- **[Sep 2026]:** 🎉 Our **Falcon-X** and **[ORCA](https://arxiv.org/abs/2606.14222)** ([Code](https://github.com/Fifthky/ORCA)) have been accepted to **NeurIPS 2026**, and **Falcon-2.0** to the **FMTS Workshop at NeurIPS 2026**! These works advance our research toward online time series applications, spanning foundation modeling and black-box online adaptation. See you in Sydney!
 
 - **[Aug 2026]:** 🚀 Released **Falcon-2.0**, our latest time-series foundation model, together with its technical report [![arXiv](https://img.shields.io/badge/arXiv-b31b1b.svg)](https://arxiv.org/abs/2608.13262) and [API](falcon2/README.md).
 
