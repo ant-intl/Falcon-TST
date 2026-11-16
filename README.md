@@ -170,6 +170,12 @@ If you find this repo useful, please consider citing our papers as follows:
 ```
 
 
+## 📬 Contact
+
+For research inquiries and collaboration opportunities, please contact us at [zewei.dong@ant-intl.com](mailto:zewei.dong@ant-intl.com) or [yiding.lyd@ant-intl.com](mailto:yiding.lyd@ant-intl.com).
+
+For bug reports, usage questions, and feature requests, please open a [GitHub issue](https://github.com/ant-intl/Falcon-TST/issues).
+
 ## 📄 License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
